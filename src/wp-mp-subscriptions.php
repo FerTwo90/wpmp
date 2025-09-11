@@ -42,20 +42,27 @@ add_shortcode('mp_subscribe', function($atts){
   if (!is_user_logged_in()) {
     return '<a class="btn" href="'.esc_url(wp_login_url(get_permalink())).'">'.esc_html__('Iniciá sesión para suscribirte', 'wp-mp-subscriptions').'</a>';
   }
+  $default_plan = get_option('wpmps_default_plan_id', '');
   $a = shortcode_atts([
+    'plan_id'  => $default_plan, // Si está presente, usa flujo de plan
     'amount'   => '10000',      // ARS
     'reason'   => __('Suscripción', 'wp-mp-subscriptions'),
     'currency' => 'ARS',
     'back'     => '/suscribirse/resultado'
   ], $atts);
 
-  $url = wp_nonce_url(add_query_arg([
+  $args = [
     'wpmps'   => 'create',
-    'amount'  => $a['amount'],
     'reason'  => $a['reason'],
-    'currency'=> $a['currency'],
     'back'    => $a['back'],
-  ], home_url('/')), 'wpmps_create');
+  ];
+  if (!empty($a['plan_id'])) {
+    $args['plan_id'] = $a['plan_id'];
+  } else {
+    $args['amount']   = $a['amount'];
+    $args['currency'] = $a['currency'];
+  }
+  $url = wp_nonce_url(add_query_arg($args, home_url('/')), 'wpmps_create');
 
   return '<a class="btn" href="'.esc_url($url).'">'.esc_html__('Suscribirme', 'wp-mp-subscriptions').'</a>';
 });
@@ -70,23 +77,35 @@ add_action('template_redirect', function(){
   if (empty($token)) wp_die(__('Falta Access Token de Mercado Pago. Configuralo en Ajustes → WPMPS o en wp-config.php', 'wp-mp-subscriptions'));
 
   $u = wp_get_current_user();
-  $amount   = floatval($_GET['amount'] ?? 0);
   $reason   = sanitize_text_field($_GET['reason'] ?? 'Suscripción');
-  $currency = sanitize_text_field($_GET['currency'] ?? 'ARS');
   $back     = esc_url_raw(home_url(sanitize_text_field($_GET['back'] ?? '/')));
+  $plan_id  = sanitize_text_field($_GET['plan_id'] ?? '');
+  $amount   = floatval($_GET['amount'] ?? 0);
+  $currency = sanitize_text_field($_GET['currency'] ?? 'ARS');
 
   $client = new WPMPS_MP_Client($token);
-  $body = [
-    'reason'        => $reason,
-    'payer_email'   => $u->user_email,
-    'back_url'      => $back,
-    'auto_recurring'=> [
-      'frequency'        => 1,
-      'frequency_type'   => 'months',
-      'transaction_amount'=> $amount,
-      'currency_id'      => $currency
-    ],
-  ];
+  if (!empty($plan_id)) {
+    // Crear preapproval basado en un plan existente
+    $body = [
+      'reason'              => $reason,
+      'payer_email'         => $u->user_email,
+      'back_url'            => $back,
+      'preapproval_plan_id' => $plan_id,
+    ];
+  } else {
+    // Flujo legacy por monto directo
+    $body = [
+      'reason'        => $reason,
+      'payer_email'   => $u->user_email,
+      'back_url'      => $back,
+      'auto_recurring'=> [
+        'frequency'         => 1,
+        'frequency_type'    => 'months',
+        'transaction_amount'=> $amount,
+        'currency_id'       => $currency
+      ],
+    ];
+  }
 
   $resp = $client->create_preapproval($body);
   if ($resp['http'] === 201 && !empty($resp['body']['init_point'])) {

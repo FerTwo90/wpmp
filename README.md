@@ -45,6 +45,7 @@ Dentro de `src/`:
 ## Endpoints
 
 - Trigger interno (GET): `/?wpmps=create&amount=...&reason=...&back=...` (protegido por nonce) → crea preapproval y redirige a MP.
+- Trigger con Plan (GET): `/?wpmps=create&plan_id=PREAPPROVAL_PLAN_ID&reason=...&back=...` → crea un preapproval basado en un plan existente y redirige a MP (con `back_url`).
 - Webhook (POST): `/wp-json/mp/v1/webhook` → revalida contra API de MP y setea `user_meta` `_suscripcion_activa` (`yes|no`).
 
 ## Instalación
@@ -54,6 +55,8 @@ Dentro de `src/`:
 3) En WP: Plugins → Añadir nuevo → Subir plugin → Activar.
 4) En Mercado Pago: configurar webhook a `https://TU-DOMINIO/wp-json/mp/v1/webhook`.
 5) Insertar el shortcode en una página: `[mp_subscribe amount="10000" reason="Club de Descuentos" back="/suscribirse/resultado"]`.
+   - Con Plan: `[mp_subscribe plan_id="PREAPPROVAL_PLAN_ID" reason="Club de Descuentos" back="/suscribirse/resultado"]`.
+   - También podés definir un “Plan ID por defecto” en Ajustes → WPMPS y usar sólo `[mp_subscribe back="/resultado"]`.
 
 ## Uso
 

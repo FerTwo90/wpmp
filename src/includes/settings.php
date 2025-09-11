@@ -32,6 +32,10 @@ function wpmps_render_settings_page(){
       $effective = $opt_token;
       $has_token = !empty($effective);
     }
+    if (isset($_POST['wpmps_default_plan_id'])) {
+      $pid = sanitize_text_field(wp_unslash($_POST['wpmps_default_plan_id']));
+      update_option('wpmps_default_plan_id', $pid, false);
+    }
     $saved = true;
   }
   if (isset($_GET['wpmps_ping']) && check_admin_referer('wpmps_ping')) {
@@ -52,6 +56,13 @@ function wpmps_render_settings_page(){
   echo '<tr><th>'.esc_html__('URL de Webhook', 'wp-mp-subscriptions').'</th><td>';
   echo '<input type="text" id="wpmps_webhook" class="regular-text" readonly value="'.esc_attr($webhook).'" /> ';
   echo '<button class="button" type="button" id="wpmps_copy">'.esc_html__('Copiar', 'wp-mp-subscriptions').'</button>';
+  echo '</td></tr>';
+
+  // Plan ID por defecto
+  $default_plan = get_option('wpmps_default_plan_id', '');
+  echo '<tr><th>'.esc_html__('Plan ID por defecto', 'wp-mp-subscriptions').'</th><td>';
+  echo '<input type="text" name="wpmps_default_plan_id" class="regular-text" value="'.esc_attr($default_plan).'" placeholder="preapproval_plan_id" />';
+  echo '<p class="description">'.esc_html__('Si se completa, el shortcode usará este Plan ID salvo que se pase plan_id="...".', 'wp-mp-subscriptions').'</p>';
   echo '</td></tr>';
 
   echo '<tr><th>'.esc_html__('Token detectado', 'wp-mp-subscriptions').'</th><td>';
