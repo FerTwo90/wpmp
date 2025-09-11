@@ -3,3 +3,5 @@ outputs/
 .DS_Store
 .idea/
 node_modules/
+wordpress/
+docker-compose.yml

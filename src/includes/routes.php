@@ -36,15 +36,36 @@ function wpmps_handle_webhook(WP_REST_Request $req){
   $pre = $resp['body'];
   $email  = sanitize_email($pre['payer_email'] ?? '');
   $status = sanitize_text_field($pre['status'] ?? '');
+  $planId = sanitize_text_field($pre['preapproval_plan_id'] ?? '');
+  $preId  = sanitize_text_field($pre['id'] ?? $preapproval_id);
 
   if ($email) {
     $user = get_user_by('email', $email);
     if ($user) {
       $active = ($status === 'authorized') ? 'yes' : 'no';
       update_user_meta($user->ID, '_suscripcion_activa', $active);
+      if ($preId) update_user_meta($user->ID, '_mp_preapproval_id', $preId);
+      if ($planId) update_user_meta($user->ID, '_mp_plan_id', $planId);
+      update_user_meta($user->ID, '_mp_updated_at', current_time('mysql'));
+
+      // Opcional: asignar/quitar rol suscriptor_premium
+      $map_role = (bool) get_option('wpmps_role_on_authorized', false);
+      if ($map_role) {
+        $role = 'suscriptor_premium';
+        if (!get_role($role)) add_role($role, __('Suscriptor Premium','wp-mp-subscriptions'), ['read'=>true]);
+        $u = new WP_User($user->ID);
+        if ($active === 'yes') { $u->add_role($role); } else { $u->remove_role($role); }
+      }
     }
   }
 
-  wpmps_log('Webhook OK', ['id'=>$preapproval_id,'status'=>$status,'email'=>$email]);
+  // Persistir un pequeño log de eventos (máx. 50)
+  $events = get_option('wpmps_webhook_events', []);
+  if (!is_array($events)) $events = [];
+  $events[] = ['date'=>current_time('mysql'),'preapproval_id'=>$preId,'status'=>$status,'email'=>$email];
+  if (count($events) > 50) $events = array_slice($events, -50);
+  update_option('wpmps_webhook_events', $events, false);
+
+  wpmps_log('Webhook OK', ['id'=>$preId,'status'=>$status,'email'=>$email]);
   return new WP_REST_Response(['ok'=>true], 200);
 }

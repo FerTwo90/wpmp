@@ -1,0 +1,14 @@
+{
+  "apiVersion": 2,
+  "name": "wpmps/subscribe-button",
+  "title": "MP Subscribe Button",
+  "category": "widgets",
+  "attributes": {
+    "plan_id": { "type": "string", "default": "" },
+    "label": { "type": "string", "default": "Suscribirme" },
+    "back": { "type": "string", "default": "/resultado-suscripcion" }
+  },
+  "supports": { "html": false },
+  "editorScript": "file:./index.js"
+}
+

@@ -1,11 +1,9 @@
 <?php
 /**
- * Plugin Name: WP MP Subscriptions — Preapproval (by Devecoop)
- * Plugin URI: https://TODO-devecoop.example/plugins/wp-mp-subscriptions
- * Description: Suscripciones automáticas con Mercado Pago (Preapproval): botón → redirección segura → webhook que valida y otorga acceso.
- * Version: 0.1.1
+ * Plugin Name: AATestIntegracion MP WP — (by Devecoop)
+  * Description: Suscripciones con Mercado Pago: botón → redirección segura → webhook que valida y otorga acceso.
+ * Version: 0.2.0
  * Author: Devecoop
- * Author URI: https://TODO-devecoop.example
  * License: GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain: wp-mp-subscriptions
@@ -13,20 +11,22 @@
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Tested up to: 6.6
- * Update URI: https://TODO-devecoop.example/plugins/wp-mp-subscriptions/update
  */
 
 if (!defined('ABSPATH')) exit;
 
 define('WPMPS_DIR', plugin_dir_path(__FILE__));
-define('WPMPS_VER', '0.1.1');
+define('WPMPS_VER', '0.2.0');
 
 // Requiere Access Token en wp-config.php:
 // define('MP_ACCESS_TOKEN', 'APP_USR-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-xxxxxx');
 
 require_once WPMPS_DIR.'includes/helpers.php';
-require_once WPMPS_DIR.'includes/class-mp-client.php';
-require_once WPMPS_DIR.'includes/routes.php';
+ require_once WPMPS_DIR.'includes/class-mp-client.php';
+ require_once WPMPS_DIR.'includes/routes.php';
+  require_once WPMPS_DIR.'includes/class-wpmps-sync.php';
+  require_once WPMPS_DIR.'includes/class-wpmps-subscribers.php';
+  require_once WPMPS_DIR.'admin/class-wpmps-admin.php';
 // Ajustes (opcional)
 if (file_exists(WPMPS_DIR.'includes/settings.php')) {
   require_once WPMPS_DIR.'includes/settings.php';
@@ -36,6 +36,25 @@ if (file_exists(WPMPS_DIR.'includes/settings.php')) {
 add_action('plugins_loaded', function(){
   load_plugin_textdomain('wp-mp-subscriptions', false, dirname(plugin_basename(__FILE__)).'/languages');
 });
+
+// Admin init
+if (is_admin()){
+  add_action('init', function(){
+    if (class_exists('WPMPS_Admin')) WPMPS_Admin::init();
+    // Registrar bloque Gutenberg (server) si existe
+    if (function_exists('register_block_type_from_metadata')){
+      register_block_type_from_metadata(WPMPS_DIR.'blocks/subscribe-button', [
+        'render_callback' => function($attrs){
+          $plan = isset($attrs['plan_id']) ? sanitize_text_field($attrs['plan_id']) : '';
+          $label= isset($attrs['label']) ? sanitize_text_field($attrs['label']) : __('Suscribirme','wp-mp-subscriptions');
+          $back = isset($attrs['back']) ? esc_url_raw($attrs['back']) : '/resultado-suscripcion';
+          $sc = '[mp_subscribe '.($plan?('plan_id="'.esc_attr($plan).'" '):'').'reason="'.esc_attr($label).'" back="'.esc_attr($back).'"]';
+          return do_shortcode($sc);
+        }
+      ]);
+    }
+  });
+}
 
 // Shortcode simple: [mp_subscribe amount="10000" reason="Club de Descuentos" back="/suscribirse/resultado"]
 add_shortcode('mp_subscribe', function($atts){

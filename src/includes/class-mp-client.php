@@ -41,4 +41,23 @@ class WPMPS_MP_Client {
     $body = json_decode(wp_remote_retrieve_body($res), true);
     return ['http'=>$http,'body'=>$body ?: []];
   }
+
+  // ----- Plans (best-effort, may vary by region)
+  public function get_preapproval_plan($id){
+    $res = wp_remote_get($this->api.'/preapproval_plan/'.rawurlencode($id), [
+      'headers' => $this->headers(),
+      'timeout' => 20
+    ]);
+    return $this->normalize_response($res);
+  }
+
+  public function search_preapproval_plans($params = []){
+    $query = http_build_query($params);
+    $url = $this->api.'/preapproval_plan/search'.($query?('?'.$query):'');
+    $res = wp_remote_get($url, [
+      'headers' => $this->headers(),
+      'timeout' => 20
+    ]);
+    return $this->normalize_response($res);
+  }
 }

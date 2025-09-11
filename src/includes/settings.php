@@ -36,6 +36,7 @@ function wpmps_render_settings_page(){
       $pid = sanitize_text_field(wp_unslash($_POST['wpmps_default_plan_id']));
       update_option('wpmps_default_plan_id', $pid, false);
     }
+    update_option('wpmps_role_on_authorized', isset($_POST['wpmps_role_on_authorized']) ? 1 : 0, false);
     $saved = true;
   }
   if (isset($_GET['wpmps_ping']) && check_admin_referer('wpmps_ping')) {
@@ -56,6 +57,14 @@ function wpmps_render_settings_page(){
   echo '<tr><th>'.esc_html__('URL de Webhook', 'wp-mp-subscriptions').'</th><td>';
   echo '<input type="text" id="wpmps_webhook" class="regular-text" readonly value="'.esc_attr($webhook).'" /> ';
   echo '<button class="button" type="button" id="wpmps_copy">'.esc_html__('Copiar', 'wp-mp-subscriptions').'</button>';
+  echo '</td></tr>';
+
+  // Entorno (badge sandbox/producción)
+  $env = (!empty($effective) && strpos($effective, 'TEST-') === 0) ? 'SANDBOX' : ((!empty($effective) && strpos($effective, 'APP_USR-') === 0) ? 'PROD' : '');
+  echo '<tr><th>'.esc_html__('Entorno', 'wp-mp-subscriptions').'</th><td>';
+  if ($env === 'SANDBOX') echo '<span style="color:#f90">'.esc_html__('Sandbox','wp-mp-subscriptions').'</span>';
+  elseif ($env === 'PROD') echo '<span style="color:#0a0">'.esc_html__('Producción','wp-mp-subscriptions').'</span>';
+  else echo '<span>-</span>';
   echo '</td></tr>';
 
   // Plan ID por defecto
@@ -86,6 +95,8 @@ function wpmps_render_settings_page(){
 
   echo '</table>';
   wp_nonce_field('wpmps_save');
+  $role_toggle = get_option('wpmps_role_on_authorized', false) ? 'checked' : '';
+  echo '<p><label><input type="checkbox" name="wpmps_role_on_authorized" value="1" '.$role_toggle.'> '.esc_html__('Asignar rol suscriptor_premium cuando esté authorized', 'wp-mp-subscriptions').'</label></p>';
   echo '<p><button type="submit" name="wpmps_save" class="button button-primary" '.(!empty($const_token)?'disabled':'').'>'.esc_html__('Guardar', 'wp-mp-subscriptions').'</button></p>';
   echo '</form>';
 

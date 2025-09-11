@@ -1,4 +1,4 @@
-# wp-mp-subscriptions — Mercado Pago Preapproval (by Devecoop)
+# Mercadopago plugin para wordpress (by Devecoop)
 
 Plugin de WordPress para suscripciones automáticas con Mercado Pago (Preapproval): shortcode/botón en WP → creación de preapproval → checkout/autorización en MP → webhook de validación → actualización de acceso en WP.
 
@@ -8,14 +8,65 @@ Requisitos: PHP ≥ 7.4, WordPress ≥ 6.0. El token no se guarda en el repo; de
 
 ```mermaid
 flowchart LR
-  A[WP: Shortcode / Botón] --> B[Server: Create Preapproval (API MP)]
-  B --> C{MP Checkout}
-  C -->|Autoriza| D[Preapproval authorized]
-  C -->|Cancela/Falla| E[paused/cancelled]
-  D --> F[Webhook MP → /wp-json/mp/v1/webhook]
-  E --> F
-  F --> G[WP set user_meta _suscripcion_activa]
-  G --> H[Página de descuentos (gate)]
+  %% Actores y componentes
+  subgraph Admin[WP Admin]
+    A1["WPMPS Ajustes\n- Token (constante u opción)\n- Plan por defecto\n- Rol opcional"]
+    A2["Planes (read-only)\nSincronizar cache 20m"]
+    A3["Generador de Botón / Bloque\n(plan, label, back_url)"]
+    A4["Suscriptores (read-only)\n- Refresh estado\n- Export CSV"]
+    A5["Logs Webhook\n- Reprocesar evento"]
+  end
+
+  subgraph Frontend[WP Front]
+    F1["Shortcode/Bloque\n[mp_subscribe ...]"]
+    F2["Usuario hace clic"]
+  end
+
+  subgraph Backend[WP Server]
+    B1["template_redirect\n/?wpmps=create"]
+    B2{"¿plan_id?"}
+    B3["Crear Preapproval\nPOST /preapproval\n(Idempotency-Key)"]
+    B4["Redirect a init_point"]
+    B5["Webhook REST\n/wp-json/mp/v1/webhook"]
+    B6["Validar estado\nGET /preapproval/{id}"]
+    B7["Actualizar user_meta\n_suscripcion_activa yes/no\n_mp_preapproval_id\n_mp_plan_id\n_mp_updated_at"]
+    B8{"Rol opcional"}
+    B9["Asignar/Quitar\nsuscriptor_premium"]
+    B10["Logs últimos 50\nen opción"]
+  end
+
+  subgraph MP[Mercado Pago]
+    M1[Checkout]
+    M2[API Preapproval]
+    M3[Webhook → WP]
+  end
+
+  %% Flujo Admin y contenido
+  A2 -->|Sincronizar| M2
+  M2 -->|Planes normalizados| A2
+  A3 -->|Inserta shortcode/bloque| F1
+
+  %% Flujo usuario
+  F1 --> F2 --> B1
+  B1 -->|nonce + login + token| B2
+  B2 -- Sí --> B3
+  B2 -- No --> B3
+  B3 -->|token servidor| M2 --> B4 --> M1
+  M1 -->|Autoriza/Cancela| M3 --> B5 --> B6
+  B6 --> B7 --> B10
+  B7 --> B8
+  B8 -- Activado y authorized --> B9
+  B8 -- Otro caso --> B10
+
+  %% Vistas admin sobre datos
+  B10 -. muestra .-> A5
+  B7  -. lista .-> A4
+  A5 -->|Reprocesar| B6
+  A4 -->|Refresh estado| B6
+
+  %% Notas
+  classDef note fill:#f6f8fa,stroke:#d0d7de,color:#24292e;
+  N1(["Token: wpmps_get_access_token()\n1) MP_ACCESS_TOKEN (wp-config)\n2) Opción guardada en Ajustes"]):::note
 ```
 
 ## Estructura del repo
@@ -93,5 +144,6 @@ Dentro de `src/`:
 
 ## Changelog
 
+- 0.2.0: Modo low-code: menú admin con pestañas (Planes, Botones, Suscriptores, Logs), sincronización de planes (cache), generador de shortcodes, export CSV, logs y reproceso, block Gutenberg “MP Subscribe Button”, settings con rol opcional y badge de entorno. Soporte `plan_id` en shortcode y plan por defecto.
 - 0.1.1: Header con branding/links/i18n; página mínima de Ajustes; LICENSE; README actualizado.
 - 0.1.0: Versión inicial funcional (shortcode, preapproval, webhook).
