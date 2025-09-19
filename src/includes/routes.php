@@ -10,6 +10,18 @@ add_action('rest_api_init', function () {
 });
 
 function wpmps_handle_webhook(WP_REST_Request $req){
+  // Log headers/body summary on entry
+  $h = [
+    'ua' => $req->get_header('user_agent'),
+    'xff'=> $req->get_header('x_forwarded_for'),
+    'cfip'=> $req->get_header('cf_connecting_ip'),
+    'rip'=> $req->get_header('x_real_ip'),
+    'ct' => $req->get_header('content_type'),
+    'sig_present' => $req->get_header('x_signature') ? true : false,
+  ];
+  $raw = $req->get_body();
+  $raw_len = is_string($raw) ? strlen($raw) : 0;
+  wpmps_log('WEBHOOK', wpmps_collect_context('webhook_received', [ 'headers'=>$h, 'raw_len'=>$raw_len ]));
   $token = function_exists('wpmps_get_access_token') ? wpmps_get_access_token() : (defined('MP_ACCESS_TOKEN') ? MP_ACCESS_TOKEN : '');
   if (empty($token)) {
     return new WP_REST_Response(['ok'=>false,'err'=>'no token'], 400);
@@ -21,7 +33,7 @@ function wpmps_handle_webhook(WP_REST_Request $req){
 
   $preapproval_id = $query_id ?: $body_id;
   if (!$preapproval_id) {
-    wpmps_log('Webhook sin id', $body);
+    wpmps_log('WEBHOOK', wpmps_collect_context('webhook', ['http_code'=>400,'reason'=>'no_id','body_has'=> array_keys((array)$body)]));
     return new WP_REST_Response(['ok'=>false,'err'=>'no id'], 400);
   }
 
@@ -29,7 +41,10 @@ function wpmps_handle_webhook(WP_REST_Request $req){
   $resp   = $client->get_preapproval($preapproval_id);
 
   if ($resp['http'] !== 200) {
-    wpmps_log('No se pudo consultar preapproval', $resp);
+    wpmps_log('WEBHOOK', wpmps_collect_context('webhook_fetch', [
+      'http_code'=>$resp['http'] ?? 0,
+      'preapproval_id'=>$preapproval_id,
+    ]));
     return new WP_REST_Response(['ok'=>false,'err'=>'fetch'], 200);
   }
 
@@ -48,24 +63,147 @@ function wpmps_handle_webhook(WP_REST_Request $req){
       if ($planId) update_user_meta($user->ID, '_mp_plan_id', $planId);
       update_user_meta($user->ID, '_mp_updated_at', current_time('mysql'));
 
-      // Opcional: asignar/quitar rol suscriptor_premium
-      $map_role = (bool) get_option('wpmps_role_on_authorized', false);
-      if ($map_role) {
-        $role = 'suscriptor_premium';
-        if (!get_role($role)) add_role($role, __('Suscriptor Premium','wp-mp-subscriptions'), ['read'=>true]);
+      // Opcional: asignar/quitar rol configurado en ajustes
+      $role_option = get_option('wpmps_role_on_authorized', '');
+      if ($role_option === 1 || $role_option === '1') {
+        $role_option = 'suscriptor_premium';
+      }
+      if (is_string($role_option)) {
+        $role_option = trim($role_option);
+      } else {
+        $role_option = '';
+      }
+      if ($role_option !== '') {
+        if (!get_role($role_option) && $role_option === 'suscriptor_premium') {
+          add_role($role_option, __('Suscriptor Premium','wp-mp-subscriptions'), ['read'=>true]);
+        }
         $u = new WP_User($user->ID);
-        if ($active === 'yes') { $u->add_role($role); } else { $u->remove_role($role); }
+        if ($active === 'yes') {
+          $u->add_role($role_option);
+        } else {
+          $u->remove_role($role_option);
+        }
       }
     }
   }
 
-  // Persistir un pequeño log de eventos (máx. 50)
-  $events = get_option('wpmps_webhook_events', []);
-  if (!is_array($events)) $events = [];
-  $events[] = ['date'=>current_time('mysql'),'preapproval_id'=>$preId,'status'=>$status,'email'=>$email];
-  if (count($events) > 50) $events = array_slice($events, -50);
-  update_option('wpmps_webhook_events', $events, false);
-
-  wpmps_log('Webhook OK', ['id'=>$preId,'status'=>$status,'email'=>$email]);
+  wpmps_log('WEBHOOK', wpmps_collect_context('webhook', [
+    'http_code' => 200,
+    'preapproval_id' => $preId,
+    'status'=>$status,
+    'user_email'=>$email,
+  ]));
   return new WP_REST_Response(['ok'=>true], 200);
 }
+
+add_action('template_redirect', function(){
+  $target = 'finalizar-subscripcion';
+  $request_uri = $_SERVER['REQUEST_URI'] ?? '';
+  $path = trim((string) parse_url($request_uri, PHP_URL_PATH), '/');
+  $current_user = wp_get_current_user();
+  
+  // Solo registrar si coincide con la ruta objetivo
+  if ($path === trim($target, '/')) {
+    // Datos básicos para el resumen
+    $log_data = [
+      'channel' => 'SUBSCRIPTION',
+      'ctx' => 'redirect',
+      'method' => $_SERVER['REQUEST_METHOD'] ?? 'UNKNOWN',
+      'path' => $path,
+      'uri' => $request_uri,
+      'full_url' => home_url($request_uri),
+      'http_referer' => $_SERVER['HTTP_REFERER'] ?? '',
+      'remote_addr' => $_SERVER['REMOTE_ADDR'] ?? '',
+      'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? ''
+    ];
+    
+    // Asegurar que los datos importantes estén en el nivel superior para el resumen
+    if (isset($_GET['preapproval_id'])) {
+      $log_data['preapproval_id'] = sanitize_text_field(wp_unslash($_GET['preapproval_id']));
+    }
+    if (isset($_GET['id'])) {
+      $log_data['mp_id'] = sanitize_text_field(wp_unslash($_GET['id']));
+    }
+    
+    wpmps_log('SUBSCRIPTION', $log_data);
+  }
+
+  if ($path !== trim($target, '/')) {
+    return;
+  }
+
+  $destination = home_url('/' . trim($target, '/'));
+
+  if (!is_user_logged_in()) {
+    wp_redirect(wp_login_url($destination));
+    exit;
+  }
+
+  $preapproval_id = '';
+  if (isset($_GET['preapproval_id'])) {
+    $preapproval_id = sanitize_text_field(wp_unslash($_GET['preapproval_id']));
+  } elseif (isset($_GET['id'])) {
+    $preapproval_id = sanitize_text_field(wp_unslash($_GET['id']));
+  } else {
+    $first_key = array_key_first($_GET ?? []);
+    if ($first_key && !in_array($first_key, ['ok','mp_err','mp_status'], true)) {
+      $preapproval_id = sanitize_text_field(wp_unslash($_GET[$first_key]));
+    }
+  }
+
+  if ($preapproval_id === '') {
+    return;
+  }
+
+  $token = function_exists('wpmps_get_access_token') ? wpmps_get_access_token() : (defined('MP_ACCESS_TOKEN') ? MP_ACCESS_TOKEN : '');
+  if (empty($token)) {
+    $error_message = __('Falta Access Token de Mercado Pago.', 'wp-mp-subscriptions');
+    wp_redirect(add_query_arg('mp_err', rawurlencode($error_message), $destination));
+    exit;
+  }
+
+  $client = new WPMPS_MP_Client($token);
+  $response = $client->get_preapproval($preapproval_id);
+  $http = $response['http'] ?? 0;
+  
+  if ($http !== 200 || empty($response['body'])) {
+    $error_message = __('No se pudo consultar el estado de la suscripción.', 'wp-mp-subscriptions');
+    if (!empty($response['body']['error'])) {
+      $error_message .= ' '.sanitize_text_field($response['body']['error']);
+    }
+    
+    wp_redirect(add_query_arg('mp_err', rawurlencode($error_message), $destination));
+    exit;
+  }
+
+  $body = is_array($response['body']) ? $response['body'] : [];
+  $status = sanitize_text_field($body['status'] ?? 'pending');
+  $remote_id = sanitize_text_field($body['id'] ?? $preapproval_id);
+  $user_id = get_current_user_id();
+
+  update_user_meta($user_id, '_mp_preapproval_id', $remote_id);
+  update_user_meta($user_id, '_mp_sub_status', $status);
+
+  $redirect_url = add_query_arg(['ok' => 1, 'mp_status' => $status], $destination);
+  wp_redirect($redirect_url);
+  exit;
+});
+
+add_action('wp_footer', function(){
+  $request_uri = isset($_SERVER['REQUEST_URI']) ? wp_unslash($_SERVER['REQUEST_URI']) : '';
+  $path = trim((string) parse_url($request_uri, PHP_URL_PATH), '/');
+  if ($path !== 'finalizar-subscripcion') {
+    return;
+  }
+
+  if (isset($_GET['ok'])) {
+    $status = isset($_GET['mp_status']) ? sanitize_text_field(wp_unslash($_GET['mp_status'])) : 'pending';
+    $message = sprintf(__('Suscripción registrada. Estado: %s', 'wp-mp-subscriptions'), $status);
+  } elseif (isset($_GET['mp_err'])) {
+    $message = sanitize_text_field(wp_unslash($_GET['mp_err']));
+  } else {
+    return;
+  }
+
+  echo '<script>try{alert('.wp_json_encode($message).');}catch(e){console.log('.wp_json_encode($message).');}</script>';
+});

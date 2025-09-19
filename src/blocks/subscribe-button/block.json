@@ -6,9 +6,8 @@
   "attributes": {
     "plan_id": { "type": "string", "default": "" },
     "label": { "type": "string", "default": "Suscribirme" },
-    "back": { "type": "string", "default": "/resultado-suscripcion" }
+    "class": { "type": "string", "default": "wp-mps-btn" }
   },
   "supports": { "html": false },
   "editorScript": "file:./index.js"
 }
-

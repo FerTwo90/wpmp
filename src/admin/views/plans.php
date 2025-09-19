@@ -1,11 +1,9 @@
 <?php if (!defined('ABSPATH')) exit; ?>
-<div class="wrap">
-  <h1><?php echo esc_html__('Planes', 'wp-mp-subscriptions'); ?></h1>
-  <p>
-    <a href="<?php echo esc_url(wp_nonce_url(admin_url('admin-post.php?action=wpmps_sync_plans'), 'wpmps_sync_plans')); ?>" class="button"><?php echo esc_html__('Sincronizar ahora', 'wp-mp-subscriptions'); ?></a>
-  </p>
+<p>
+  <a href="<?php echo esc_url(wp_nonce_url(admin_url('admin-post.php?action=wpmps_sync_plans'), 'wpmps_sync_plans')); ?>" class="button"><?php echo esc_html__('Sincronizar ahora', 'wp-mp-subscriptions'); ?></a>
+</p>
 
-  <table class="widefat fixed striped">
+<table class="widefat fixed striped">
     <thead><tr>
       <th><?php _e('Nombre','wp-mp-subscriptions'); ?></th>
       <th><?php _e('Plan ID','wp-mp-subscriptions'); ?></th>
@@ -25,23 +23,25 @@
           <td><?php echo esc_html($p['frequency'] ?? ''); ?></td>
           <td><?php echo esc_html($p['status'] ?? ''); ?></td>
           <td>
-            <?php $sc='[mp_subscribe plan_id="'.esc_attr($p['id'] ?? '').'" reason="'.esc_attr($p['name'] ?? '').'" back="/resultado-suscripcion"]'; ?>
+            <?php
+              $plan_id = isset($p['id']) ? sanitize_text_field($p['id']) : '';
+              $label_raw = isset($p['name']) ? $p['name'] : __('Suscribirme','wp-mp-subscriptions');
+              $label = sanitize_text_field($label_raw);
+              $sc = '[mp_subscribe plan_id="'.$plan_id.'" label="'.$label.'"]';
+            ?>
             <button type="button" class="button wpmps-copy" data-sc="<?php echo esc_attr($sc); ?>"><?php _e('Copiar shortcode','wp-mp-subscriptions'); ?></button>
-            <a class="button" href="<?php echo esc_url( admin_url('post-new.php?post_type=page&_wpmps_shortcode='.rawurlencode($sc)) ); ?>"><?php _e('Insertar en página','wp-mp-subscriptions'); ?></a>
           </td>
         </tr>
       <?php endforeach; endif; ?>
     </tbody>
   </table>
 
-  <script>
-  (function(){
-    document.querySelectorAll('.wpmps-copy').forEach(function(btn){
-      btn.addEventListener('click', function(){
-        navigator.clipboard && navigator.clipboard.writeText(btn.dataset.sc);
-      });
+<script>
+(function(){
+  document.querySelectorAll('.wpmps-copy').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      navigator.clipboard && navigator.clipboard.writeText(btn.dataset.sc);
     });
-  })();
-  </script>
-</div>
-
+  });
+})();
+</script>

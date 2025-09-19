@@ -1,24 +1,47 @@
 <?php
 if (!defined('ABSPATH')) exit;
 
+// Mantener la página de opciones pero redirigir 100% al menú del plugin
 add_action('admin_menu', function(){
+  // Usamos un slug distinto para evitar colisión con el submenú del plugin
   add_options_page(
     __('WPMPS Ajustes', 'wp-mp-subscriptions'),
     __('WPMPS', 'wp-mp-subscriptions'),
     'manage_options',
-    'wpmps-settings',
+    'wpmps-settings-redirect',
     'wpmps_render_settings_page'
   );
 });
 
 function wpmps_render_settings_page(){
   if (!current_user_can('manage_options')) return;
+  // Redirigir a la vista dentro del menú del plugin (slug sin colisión)
+  wp_safe_redirect(admin_url('admin.php?page=wpmps-settings'));
+  exit;
+}
 
-  $webhook = home_url('/wp-json/mp/v1/webhook');
+// Render reutilizable para la nueva vista en el menú del plugin
+function wpmps_render_settings_inner(){
+  if (!current_user_can('manage_options')) return;
+
+  if (!function_exists('get_editable_roles')) {
+    $user_file = ABSPATH.'wp-admin/includes/user.php';
+    if (file_exists($user_file)) {
+      require_once $user_file;
+    }
+  }
+
+  $webhook     = home_url('/wp-json/mp/v1/webhook');
   $const_token = (defined('MP_ACCESS_TOKEN') && !empty(MP_ACCESS_TOKEN)) ? MP_ACCESS_TOKEN : '';
   $opt_token   = get_option('wpmps_access_token', '');
-  $effective   = $const_token ?: $opt_token;
-  $has_token   = !empty($effective);
+  $roles       = function_exists('get_editable_roles') ? get_editable_roles() : [];
+  $saved_role  = get_option('wpmps_role_on_authorized', '');
+  if ($saved_role === 1 || $saved_role === '1') {
+    $saved_role = 'suscriptor_premium';
+  }
+  if (!is_string($saved_role)) {
+    $saved_role = '';
+  }
 
   // Ping simple (sin exponer token)
   $saved = false;
@@ -29,14 +52,22 @@ function wpmps_render_settings_page(){
       $new = isset($_POST['wpmps_access_token']) ? trim(wp_unslash($_POST['wpmps_access_token'])) : '';
       update_option('wpmps_access_token', $new, false);
       $opt_token = $new;
-      $effective = $opt_token;
-      $has_token = !empty($effective);
     }
-    if (isset($_POST['wpmps_default_plan_id'])) {
-      $pid = sanitize_text_field(wp_unslash($_POST['wpmps_default_plan_id']));
-      update_option('wpmps_default_plan_id', $pid, false);
+
+    if (isset($_POST['wpmps_mp_domain'])){
+      $dom = sanitize_text_field(wp_unslash($_POST['wpmps_mp_domain']));
+      $dom = preg_replace('/[^a-z0-9\.-]/i', '', $dom);
+      if ($dom === '') $dom = 'mercadopago.com.ar';
+      update_option('wpmps_mp_domain', $dom, false);
     }
-    update_option('wpmps_role_on_authorized', isset($_POST['wpmps_role_on_authorized']) ? 1 : 0, false);
+
+    $role_choice = isset($_POST['wpmps_role_on_authorized']) ? sanitize_text_field(wp_unslash($_POST['wpmps_role_on_authorized'])) : '';
+    if ($role_choice !== '' && !isset($roles[$role_choice])) {
+      $role_choice = '';
+    }
+    update_option('wpmps_role_on_authorized', $role_choice, false);
+    $saved_role = $role_choice;
+
     $saved = true;
   }
   if (isset($_GET['wpmps_ping']) && check_admin_referer('wpmps_ping')) {
@@ -51,68 +82,84 @@ function wpmps_render_settings_page(){
     echo '<div class="notice notice-success is-dismissible"><p>'.esc_html__('Ajustes guardados.', 'wp-mp-subscriptions').'</p></div>';
   }
 
-  // Abrimos el formulario antes de la tabla para que el input se envíe
   echo '<form method="post" action="">';
   echo '<table class="form-table" role="presentation">';
+
+  $mp_domain = get_option('wpmps_mp_domain', 'mercadopago.com.ar');
+  echo '<tr><th>'.esc_html__('Dominio de MP (Link)', 'wp-mp-subscriptions').'</th><td>';
+  echo '<input type="text" name="wpmps_mp_domain" class="regular-text" value="'.esc_attr($mp_domain).'" placeholder="mercadopago.com.ar" />';
+  echo '<p class="description">'.esc_html__('Sólo para modo Link: dominio base del checkout de suscripciones. Ej: mercadopago.com.ar', 'wp-mp-subscriptions').'</p>';
+  echo '</td></tr>';
+
   echo '<tr><th>'.esc_html__('URL de Webhook', 'wp-mp-subscriptions').'</th><td>';
   echo '<input type="text" id="wpmps_webhook" class="regular-text" readonly value="'.esc_attr($webhook).'" /> ';
   echo '<button class="button" type="button" id="wpmps_copy">'.esc_html__('Copiar', 'wp-mp-subscriptions').'</button>';
   echo '</td></tr>';
 
-  // Entorno (badge sandbox/producción)
-  $env = (!empty($effective) && strpos($effective, 'TEST-') === 0) ? 'SANDBOX' : ((!empty($effective) && strpos($effective, 'APP_USR-') === 0) ? 'PROD' : '');
-  echo '<tr><th>'.esc_html__('Entorno', 'wp-mp-subscriptions').'</th><td>';
-  if ($env === 'SANDBOX') echo '<span style="color:#f90">'.esc_html__('Sandbox','wp-mp-subscriptions').'</span>';
-  elseif ($env === 'PROD') echo '<span style="color:#0a0">'.esc_html__('Producción','wp-mp-subscriptions').'</span>';
-  else echo '<span>-</span>';
-  echo '</td></tr>';
-
-  // Plan ID por defecto
-  $default_plan = get_option('wpmps_default_plan_id', '');
-  echo '<tr><th>'.esc_html__('Plan ID por defecto', 'wp-mp-subscriptions').'</th><td>';
-  echo '<input type="text" name="wpmps_default_plan_id" class="regular-text" value="'.esc_attr($default_plan).'" placeholder="preapproval_plan_id" />';
-  echo '<p class="description">'.esc_html__('Si se completa, el shortcode usará este Plan ID salvo que se pase plan_id="...".', 'wp-mp-subscriptions').'</p>';
-  echo '</td></tr>';
-
-  echo '<tr><th>'.esc_html__('Token detectado', 'wp-mp-subscriptions').'</th><td>';
-  if ($has_token) {
-    echo '<span style="color: #0a0;">✅ ' . esc_html__('Sí', 'wp-mp-subscriptions') . '</span>';
-  } else {
-    echo '<span style="color: #a00;">❌ ' . esc_html__('No', 'wp-mp-subscriptions') . '</span>';
-  }
-  echo '</td></tr>';
-
-  echo '<tr><th>'.esc_html__('Access Token', 'wp-mp-subscriptions').'</th><td>';
-  $disabled = !empty($const_token) ? 'disabled' : '';
+  echo '<tr><th>'.esc_html__('Access Token de Mercado Pago', 'wp-mp-subscriptions').'</th><td>';
+  $token_disabled = !empty($const_token) ? 'disabled' : '';
   $placeholder = !empty($const_token) ? esc_attr__('Definido por wp-config.php (constante MP_ACCESS_TOKEN)', 'wp-mp-subscriptions') : esc_attr__('Pega aquí tu Access Token de MP', 'wp-mp-subscriptions');
   $value = !empty($const_token) ? $const_token : $opt_token;
   $masked = $value ? str_repeat('•', max(4, strlen($value)-4)).substr($value, -4) : '';
-  echo '<input type="password" id="wpmps_token" name="wpmps_access_token" class="regular-text" '.$disabled.' placeholder="'.$placeholder.'" value="'.esc_attr($opt_token).'" />';
+  echo '<div class="wpmps-token-wrap">';
+  echo '<input type="password" id="wpmps_token" name="wpmps_access_token" class="regular-text" '.$token_disabled.' placeholder="'.$placeholder.'" value="'.esc_attr($opt_token).'" />';
+  $toggle_disabled = !empty($const_token) ? 'disabled' : '';
+  echo '<button type="button" class="button wpmps-token-toggle" id="wpmps_toggle_token" '.$toggle_disabled.' aria-label="'.esc_attr__('Mostrar u ocultar el token', 'wp-mp-subscriptions').'">';
+  echo '<span class="dashicons dashicons-visibility" aria-hidden="true"></span>';
+  echo '</button>';
+  echo '</div>';
   if (!empty($const_token)) {
     echo '<p class="description">'.esc_html__('Actualmente se usa el token definido por constante (tiene prioridad).', 'wp-mp-subscriptions').' '.esc_html__('Valor (oculto):', 'wp-mp-subscriptions').' '.esc_html($masked).'</p>';
   }
   echo '</td></tr>';
 
+  echo '<tr><th>'.esc_html__('Rol asignado al usuario cuando se confirme la suscripción', 'wp-mp-subscriptions').'</th><td>';
+  echo '<select id="wpmps_role_on_authorized" name="wpmps_role_on_authorized" class="regular-text">';
+  echo '<option value="">'.esc_html__('No cambiar el rol actual', 'wp-mp-subscriptions').'</option>';
+  foreach ($roles as $slug => $details) {
+    $selected = selected($saved_role, $slug, false);
+    $name = isset($details['name']) ? $details['name'] : $slug;
+    echo '<option value="'.esc_attr($slug).'" '.$selected.'>'.esc_html($name).'</option>';
+  }
+  echo '</select>';
+  echo '</td></tr>';
+
   echo '</table>';
+
   wp_nonce_field('wpmps_save');
-  $role_toggle = get_option('wpmps_role_on_authorized', false) ? 'checked' : '';
-  echo '<p><label><input type="checkbox" name="wpmps_role_on_authorized" value="1" '.$role_toggle.'> '.esc_html__('Asignar rol suscriptor_premium cuando esté authorized', 'wp-mp-subscriptions').'</label></p>';
-  echo '<p><button type="submit" name="wpmps_save" class="button button-primary" '.(!empty($const_token)?'disabled':'').'>'.esc_html__('Guardar', 'wp-mp-subscriptions').'</button></p>';
+  echo '<p><button type="submit" name="wpmps_save" class="button button-primary">'.esc_html__('Guardar', 'wp-mp-subscriptions').'</button></p>';
   echo '</form>';
 
-  $ping_url = wp_nonce_url(admin_url('options-general.php?page=wpmps-settings&wpmps_ping=1'), 'wpmps_ping');
+  $ping_url = wp_nonce_url(admin_url('admin.php?page=wpmps-settings&wpmps_ping=1'), 'wpmps_ping');
   echo '<p><a href="'.esc_url($ping_url).'" class="button button-secondary">'.esc_html__('Probar conexión', 'wp-mp-subscriptions').'</a></p>';
 
   echo '<script>
     (function(){
-      var btn = document.getElementById("wpmps_copy");
-      if (!btn) return;
-      btn.addEventListener("click", function(){
-        var inp = document.getElementById("wpmps_webhook");
-        inp.select();
-        inp.setSelectionRange(0, 99999);
-        try { document.execCommand("copy"); } catch(e) {}
-      });
+      var copyBtn = document.getElementById("wpmps_copy");
+      if (copyBtn){
+        copyBtn.addEventListener("click", function(){
+          var inp = document.getElementById("wpmps_webhook");
+          if (!inp) return;
+          inp.select();
+          inp.setSelectionRange(0, 99999);
+          try { document.execCommand("copy"); } catch(e) {}
+        });
+      }
+
+      var toggleBtn = document.getElementById("wpmps_toggle_token");
+      if (toggleBtn && !toggleBtn.disabled){
+        toggleBtn.addEventListener("click", function(){
+          var inp = document.getElementById("wpmps_token");
+          if (!inp) return;
+          var isPassword = inp.getAttribute("type") === "password";
+          inp.setAttribute("type", isPassword ? "text" : "password");
+          var icon = toggleBtn.querySelector(".dashicons");
+          if (icon){
+            icon.classList.toggle("dashicons-visibility", !isPassword);
+            icon.classList.toggle("dashicons-hidden", isPassword);
+          }
+        });
+      }
     })();
   </script>';
 

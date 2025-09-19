@@ -10,4 +10,4 @@ Instalación:
 3) En Mercado Pago, configurar webhook:
    https://TU-DOMINIO/wp-json/mp/v1/webhook
 4) En una página WP, insertar:
-   [mp_subscribe amount="10000" reason="Club de Descuentos" back="/suscribirse/resultado"]
+   [mp_subscribe plan_id="PREAPPROVAL_PLAN_ID" label="Suscribirme" class="wp-mps-btn" back="/resultado-suscripcion"]
