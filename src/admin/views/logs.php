@@ -48,7 +48,7 @@ $items = class_exists('WPMPS_Logger') ? WPMPS_Logger::filtered(['channel'=>$chan
           <?php
             // Build a concise summary prioritizing HTTP + MP details, then context
             $keys = [
-              'method','path','http_code','ok','mp_error','mp_message','mp_cause_code','mp_cause_desc',
+              'method','path','http_code','ok','mp_error','mp_message','mp_error_desc','mp_cause_code','mp_cause_desc',
               'role_applied','roles_before','roles_after',
               'init_point','preapproval_id','status','plan_id','amount','currency','back','back_url',
               'state','reason','uri','cache_hint','body_raw_preview','request_id'

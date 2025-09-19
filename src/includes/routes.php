@@ -41,10 +41,66 @@ function wpmps_handle_webhook(WP_REST_Request $req){
   $resp   = $client->get_preapproval($preapproval_id);
 
   if ($resp['http'] !== 200) {
-    wpmps_log('WEBHOOK', wpmps_collect_context('webhook_fetch', [
-      'http_code'=>$resp['http'] ?? 0,
-      'preapproval_id'=>$preapproval_id,
-    ]));
+    $log_extra = [
+      'http_code'      => $resp['http'] ?? 0,
+      'preapproval_id' => $preapproval_id,
+    ];
+
+    $body = isset($resp['body']) && is_array($resp['body']) ? $resp['body'] : [];
+
+    if (!empty($body['error'])) {
+      $log_extra['mp_error'] = sanitize_text_field($body['error']);
+    }
+
+    if (!empty($body['message'])) {
+      $log_extra['mp_message'] = sanitize_text_field($body['message']);
+    }
+
+    if (!empty($body['error_description'])) {
+      $log_extra['mp_error_desc'] = sanitize_text_field($body['error_description']);
+    }
+
+    if (!empty($body['cause'])) {
+      $cause = $body['cause'];
+      if (is_array($cause)) {
+        $first = isset($cause[0]) ? $cause[0] : $cause;
+        if (is_array($first)) {
+          if (!empty($first['code'])) {
+            $log_extra['mp_cause_code'] = sanitize_text_field($first['code']);
+          }
+          if (!empty($first['description'])) {
+            $log_extra['mp_cause_desc'] = sanitize_text_field($first['description']);
+          }
+        } elseif (is_scalar($first)) {
+          $log_extra['mp_cause_desc'] = sanitize_text_field((string) $first);
+        }
+      } elseif (is_scalar($cause)) {
+        $log_extra['mp_cause_desc'] = sanitize_text_field((string) $cause);
+      }
+    }
+
+    $request_id = '';
+    if (!empty($resp['request_id'])) {
+      $request_id = $resp['request_id'];
+    } elseif (!empty($body['request_id'])) {
+      $request_id = $body['request_id'];
+    }
+    if ($request_id !== '') {
+      $log_extra['request_id'] = sanitize_text_field($request_id);
+    }
+
+    if (!empty($resp['raw_body'])) {
+      $raw_preview = $resp['raw_body'];
+      if (!is_string($raw_preview)) {
+        $raw_preview = wp_json_encode($raw_preview);
+      }
+      if (is_string($raw_preview) && $raw_preview !== '') {
+        $preview = substr($raw_preview, 0, 500);
+        $log_extra['body_raw_preview'] = sanitize_textarea_field($preview);
+      }
+    }
+
+    wpmps_log('WEBHOOK', wpmps_collect_context('webhook_fetch', $log_extra));
     return new WP_REST_Response(['ok'=>false,'err'=>'fetch'], 200);
   }
 
@@ -168,10 +224,65 @@ add_action('template_redirect', function(){
   
   if ($http !== 200 || empty($response['body'])) {
     $error_message = __('No se pudo consultar el estado de la suscripción.', 'wp-mp-subscriptions');
-    if (!empty($response['body']['error'])) {
-      $error_message .= ' '.sanitize_text_field($response['body']['error']);
+    $details = [];
+
+    if (!empty($preapproval_id)) {
+      $details[] = sprintf(__('ID: %s', 'wp-mp-subscriptions'), sanitize_text_field($preapproval_id));
     }
-    
+
+    if ($http || $http === 0) {
+      $details[] = sprintf(__('HTTP %d', 'wp-mp-subscriptions'), intval($http));
+    }
+
+    $body = is_array($response['body'] ?? null) ? $response['body'] : [];
+    if (!empty($body['error'])) {
+      $details[] = sanitize_text_field($body['error']);
+    }
+    if (!empty($body['message'])) {
+      $details[] = sanitize_text_field($body['message']);
+    }
+    if (!empty($body['error_description'])) {
+      $details[] = sanitize_text_field($body['error_description']);
+    }
+    if (!empty($body['cause'])) {
+      $cause = $body['cause'];
+      if (is_array($cause)) {
+        $first = isset($cause[0]) ? $cause[0] : $cause;
+        if (is_array($first)) {
+          if (!empty($first['code'])) {
+            $details[] = sprintf(__('Causa %s', 'wp-mp-subscriptions'), sanitize_text_field($first['code']));
+          }
+          if (!empty($first['description'])) {
+            $details[] = sanitize_text_field($first['description']);
+          }
+        } elseif (is_scalar($first)) {
+          $details[] = sanitize_text_field((string) $first);
+        }
+      } elseif (is_scalar($cause)) {
+        $details[] = sanitize_text_field((string) $cause);
+      }
+    }
+
+    if (!empty($response['request_id'])) {
+      $details[] = sprintf(__('Request ID: %s', 'wp-mp-subscriptions'), sanitize_text_field($response['request_id']));
+    }
+
+    if (!empty($response['raw_body'])) {
+      $raw_preview = $response['raw_body'];
+      if (!is_string($raw_preview)) {
+        $raw_preview = wp_json_encode($raw_preview);
+      }
+      if (is_string($raw_preview) && $raw_preview !== '') {
+        $details[] = sanitize_textarea_field(substr($raw_preview, 0, 200));
+      }
+    }
+
+    if (!empty($details)) {
+      $error_message .= ' '.implode(' | ', array_unique(array_filter($details)));
+    }
+
+    $error_message = sanitize_textarea_field($error_message);
+
     wp_redirect(add_query_arg('mp_err', rawurlencode($error_message), $destination));
     exit;
   }
