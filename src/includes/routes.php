@@ -56,10 +56,6 @@ function wpmps_handle_webhook(WP_REST_Request $req){
       $log_extra['mp_message'] = sanitize_text_field($body['message']);
     }
 
-    if (!empty($body['error_description'])) {
-      $log_extra['mp_error_desc'] = sanitize_text_field($body['error_description']);
-    }
-
     if (!empty($body['cause'])) {
       $cause = $body['cause'];
       if (is_array($cause)) {
@@ -310,11 +306,9 @@ add_action('wp_footer', function(){
   if (isset($_GET['ok'])) {
     $status = isset($_GET['mp_status']) ? sanitize_text_field(wp_unslash($_GET['mp_status'])) : 'pending';
     $message = sprintf(__('Suscripción registrada. Estado: %s', 'wp-mp-subscriptions'), $status);
+    echo '<script>try{alert('.wp_json_encode($message).');}catch(e){console.log('.wp_json_encode($message).');}</script>';
   } elseif (isset($_GET['mp_err'])) {
     $message = sanitize_text_field(wp_unslash($_GET['mp_err']));
-  } else {
-    return;
+    echo '<script>try{alert('.wp_json_encode($message).');}catch(e){console.error('.wp_json_encode($message).');}</script>';
   }
-
-  echo '<script>try{alert('.wp_json_encode($message).');}catch(e){console.log('.wp_json_encode($message).');}</script>';
 });
