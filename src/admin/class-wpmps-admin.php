@@ -8,8 +8,11 @@ class WPMPS_Admin {
     add_action('admin_post_wpmps_export_csv', [__CLASS__, 'handle_export_csv']);
     add_action('admin_post_wpmps_refresh_sub', [__CLASS__, 'handle_refresh_subscriber']);
     add_action('admin_post_wpmps_refresh_all', [__CLASS__, 'handle_refresh_all']);
-    add_action('admin_post_wpmps_simulate_sub', [__CLASS__, 'handle_simulate_subscriber']);
     add_action('admin_post_wpmps_reprocess', [__CLASS__, 'handle_reprocess']);
+    add_action('admin_post_wpmps_save_mail', [__CLASS__, 'handle_save_mail']);
+    add_action('admin_post_wpmps_deactivate_subscriber', [__CLASS__, 'deactivate_subscriber']);
+    add_action('admin_post_wpmps_change_to_pending', [__CLASS__, 'change_to_pending']);
+    add_action('admin_post_wpmps_cleanup_old_tokens', [__CLASS__, 'cleanup_old_tokens']);
     add_filter('default_content', [__CLASS__, 'maybe_inject_shortcode'], 10, 2);
   }
 
@@ -27,6 +30,8 @@ class WPMPS_Admin {
     add_submenu_page('wpmps', __('Ajustes', 'wp-mp-subscriptions'), __('Ajustes', 'wp-mp-subscriptions'), $cap, 'wpmps-settings', [__CLASS__, 'render_settings']);
     add_submenu_page('wpmps', __('Planes', 'wp-mp-subscriptions'), __('Planes', 'wp-mp-subscriptions'), $cap, 'wpmps-plans', [__CLASS__, 'render_plans']);
     add_submenu_page('wpmps', __('Suscriptores', 'wp-mp-subscriptions'), __('Suscriptores', 'wp-mp-subscriptions'), $cap, 'wpmps-subscribers', [__CLASS__, 'render_subscribers']);
+    add_submenu_page('wpmps', __('Mail', 'wp-mp-subscriptions'), __('Mail', 'wp-mp-subscriptions'), $cap, 'wpmps-mail', [__CLASS__, 'render_mail']);
+    add_submenu_page('wpmps', __('Cron', 'wp-mp-subscriptions'), __('Cron', 'wp-mp-subscriptions'), $cap, 'wpmps-cron', [__CLASS__, 'render_cron']);
     add_submenu_page('wpmps', __('Logs', 'wp-mp-subscriptions'), __('Logs', 'wp-mp-subscriptions'), $cap, 'wpmps-logs', [__CLASS__, 'render_logs']);
   }
 
@@ -45,6 +50,8 @@ class WPMPS_Admin {
       'wpmps-settings'   => __('Ajustes','wp-mp-subscriptions'),
       'wpmps-plans'      => __('Planes','wp-mp-subscriptions'),
       'wpmps-subscribers'=> __('Suscriptores','wp-mp-subscriptions'),
+      'wpmps-mail'       => __('Mail','wp-mp-subscriptions'),
+      'wpmps-cron'       => __('Cron','wp-mp-subscriptions'),
       'wpmps-logs'       => __('Logs','wp-mp-subscriptions'),
     ];
     echo '<h1 class="nav-tab-wrapper">';
@@ -76,7 +83,23 @@ class WPMPS_Admin {
 
   public static function render_subscribers(){
     if (!current_user_can('manage_options')) return;
+    
+    // Log start of render
+    if (function_exists('wpmps_log_admin')){
+      wpmps_log_admin('render_subscribers_start', []);
+    }
+    
     $subs = WPMPS_Subscribers::get_subscribers();
+    
+    // Log what we got
+    if (function_exists('wpmps_log_admin')){
+      wpmps_log_admin('render_subscribers_data', [
+        'count' => count($subs),
+        'first_email' => !empty($subs) ? ($subs[0]['email'] ?? 'N/A') : 'No data',
+        'sample_data' => !empty($subs) ? array_slice($subs, 0, 1) : []
+      ]);
+    }
+    
     // Build quick map of plan_id -> name via cached plans
     $plans = WPMPS_Sync::get_plans();
     $plans_map = [];
@@ -85,6 +108,43 @@ class WPMPS_Admin {
     echo '<h1>'.esc_html__('Suscriptores', 'wp-mp-subscriptions').'</h1>';
     self::tabs('wpmps-subscribers');
     self::view('subscribers', ['subs'=>$subs, 'plans_map'=>$plans_map]);
+    echo '</div>';
+  }
+
+  public static function render_mail(){
+    if (!current_user_can('manage_options')) return;
+    $opts = [
+      'enabled' => get_option('wpmps_mail_enabled', ''),
+      'format'  => get_option('wpmps_mail_format', 'text'),
+      'from_name' => get_option('wpmps_mail_from_name', 'Hoy Salgo'),
+      'from_email' => get_option('wpmps_mail_from_email', 'info@hoysalgo.com'),
+      'subject' => get_option('wpmps_mail_subject', ''),
+      'body'    => get_option('wpmps_mail_body', ''),
+    ];
+    echo '<div class="wrap">';
+    echo '<h1>'.esc_html__('Mail', 'wp-mp-subscriptions').'</h1>';
+    self::tabs('wpmps-mail');
+    self::view('mail', ['mail_opts'=>$opts]);
+    echo '</div>';
+  }
+
+  public static function render_cron(){
+    if (!current_user_can('manage_options')) return;
+    
+    $status = WPMPS_Cron::get_status();
+    
+    echo '<div class="wrap">';
+    echo '<h1>'.esc_html__('Cron de Suscripciones', 'wp-mp-subscriptions').'</h1>';
+    self::tabs('wpmps-cron');
+    
+    // Show success message if cron was run manually
+    if (isset($_GET['cron_run'])) {
+      echo '<div class="notice notice-success is-dismissible"><p>';
+      echo esc_html__('Cron ejecutado manualmente con éxito.', 'wp-mp-subscriptions');
+      echo '</p></div>';
+    }
+    
+    self::view('cron', ['status' => $status]);
     echo '</div>';
   }
 
@@ -102,8 +162,8 @@ class WPMPS_Admin {
   public static function handle_sync_plans(){
     if (!current_user_can('manage_options')) wp_die('');
     check_admin_referer('wpmps_sync_plans');
-    if (function_exists('wpmps_log') && function_exists('wpmps_collect_context')){
-      wpmps_log('DEBUG', wpmps_collect_context('admin_action', ['action'=>'wpmps_sync_plans']));
+    if (function_exists('wpmps_log_admin')){
+      wpmps_log_admin('sync_plans', []);
     }
     WPMPS_Sync::clear_cache();
     WPMPS_Sync::get_plans(true);
@@ -114,8 +174,8 @@ class WPMPS_Admin {
   public static function handle_export_csv(){
     if (!current_user_can('manage_options')) wp_die('');
     check_admin_referer('wpmps_export_csv');
-    if (function_exists('wpmps_log') && function_exists('wpmps_collect_context')){
-      wpmps_log('DEBUG', wpmps_collect_context('admin_action', ['action'=>'wpmps_export_csv']));
+    if (function_exists('wpmps_log_admin')){
+      wpmps_log_admin('export_csv', []);
     }
     $rows = WPMPS_Subscribers::get_subscribers();
     nocache_headers();
@@ -134,8 +194,8 @@ class WPMPS_Admin {
     if (!current_user_can('manage_options')) wp_die('');
     check_admin_referer('wpmps_refresh_sub');
     $uid = isset($_GET['user_id']) ? intval($_GET['user_id']) : 0;
-    if (function_exists('wpmps_log') && function_exists('wpmps_collect_context')){
-      wpmps_log('DEBUG', wpmps_collect_context('admin_action', ['action'=>'wpmps_refresh_sub','user_id'=>$uid]));
+    if (function_exists('wpmps_log_admin')){
+      wpmps_log_admin('refresh_subscriber', ['user_id'=>$uid]);
     }
     if ($uid){
       WPMPS_Subscribers::refresh_subscriber($uid);
@@ -147,8 +207,8 @@ class WPMPS_Admin {
   public static function handle_refresh_all(){
     if (!current_user_can('manage_options')) wp_die('');
     check_admin_referer('wpmps_refresh_all');
-    if (function_exists('wpmps_log') && function_exists('wpmps_collect_context')){
-      wpmps_log('DEBUG', wpmps_collect_context('admin_action', ['action'=>'wpmps_refresh_all']));
+    if (function_exists('wpmps_log_admin')){
+      wpmps_log_admin('refresh_all_subscribers', []);
     }
     $subs = WPMPS_Subscribers::get_subscribers();
     $count = 0;
@@ -163,32 +223,42 @@ class WPMPS_Admin {
     exit;
   }
 
-  // Simula el resultado de una suscripción para un usuario (testing)
-  public static function handle_simulate_subscriber(){
+  public static function handle_save_mail(){
     if (!current_user_can('manage_options')) wp_die('');
-    check_admin_referer('wpmps_simulate_sub');
-    $user_id = isset($_POST['user_id']) ? intval($_POST['user_id']) : 0;
-    $role    = isset($_POST['role']) ? sanitize_text_field(wp_unslash($_POST['role'])) : '';
+    check_admin_referer('wpmps_mail_save');
 
-    if (function_exists('wpmps_log') && function_exists('wpmps_collect_context')){
-      wpmps_log('DEBUG', wpmps_collect_context('simulate', ['user_id'=>$user_id,'role'=>$role]));
+    $enabled = isset($_POST['wpmps_mail_enabled']) ? 'yes' : '';
+    $format  = isset($_POST['wpmps_mail_format']) ? sanitize_text_field($_POST['wpmps_mail_format']) : 'text';
+    $from_name = isset($_POST['wpmps_mail_from_name']) ? sanitize_text_field(wp_unslash($_POST['wpmps_mail_from_name'])) : 'Hoy Salgo';
+    $from_email = isset($_POST['wpmps_mail_from_email']) ? sanitize_email(wp_unslash($_POST['wpmps_mail_from_email'])) : 'info@hoysalgo.com';
+    $subject = isset($_POST['wpmps_mail_subject']) ? sanitize_text_field(wp_unslash($_POST['wpmps_mail_subject'])) : '';
+    $body    = isset($_POST['wpmps_mail_body']) ? wp_kses_post(wp_unslash($_POST['wpmps_mail_body'])) : '';
+
+    // Validate format
+    if (!in_array($format, ['text', 'html'])) {
+      $format = 'text';
     }
-    $result = ['ok'=>false,'user_id'=>$user_id,'role_applied'=>$role];
-    if ($user_id && get_user_by('ID', $user_id)){
-      $wpuser = new WP_User($user_id);
-      $before = is_array($wpuser->roles) ? array_values($wpuser->roles) : [];
-      $wpuser->set_role($role);
-      $after  = is_array($wpuser->roles) ? array_values($wpuser->roles) : [];
-      $result['ok'] = in_array($role, $after, true);
-      $result['roles_before'] = $before;
-      $result['roles_after']  = $after;
-    } else {
-      $result['error'] = 'invalid_user_id';
+
+    // Validate email
+    if (!is_email($from_email)) {
+      $from_email = 'info@hoysalgo.com';
     }
-    if (function_exists('wpmps_log') && function_exists('wpmps_collect_context')){
-      wpmps_log('DEBUG', wpmps_collect_context('simulate_result', $result));
+
+    update_option('wpmps_mail_enabled', $enabled, false);
+    update_option('wpmps_mail_format', $format, false);
+    update_option('wpmps_mail_from_name', $from_name, false);
+    update_option('wpmps_mail_from_email', $from_email, false);
+    update_option('wpmps_mail_subject', $subject, false);
+    update_option('wpmps_mail_body', $body, false);
+
+    if (function_exists('wpmps_log_admin')) {
+      wpmps_log_admin('save_mail_settings', [
+        'enabled' => $enabled ? 'yes' : 'no',
+        'format' => $format,
+      ]);
     }
-    wp_redirect(admin_url('admin.php?page=wpmps-subscribers'));
+
+    wp_redirect(add_query_arg('updated', 1, admin_url('admin.php?page=wpmps-mail')));
     exit;
   }
 
@@ -196,8 +266,8 @@ class WPMPS_Admin {
     if (!current_user_can('manage_options')) wp_die('');
     check_admin_referer('wpmps_reprocess');
     $pre_id = sanitize_text_field($_GET['preapproval_id'] ?? '');
-    if (function_exists('wpmps_log') && function_exists('wpmps_collect_context')){
-      wpmps_log('DEBUG', wpmps_collect_context('admin_action', ['action'=>'wpmps_reprocess','preapproval_id'=>$pre_id]));
+    if (function_exists('wpmps_log_admin')){
+      wpmps_log_admin('reprocess_webhook', ['preapproval_id'=>$pre_id]);
     }
     if ($pre_id){
       $token = function_exists('wpmps_get_access_token') ? wpmps_get_access_token() : '';
@@ -232,5 +302,59 @@ class WPMPS_Admin {
       return $shortcode . "\n\n" . $content;
     }
     return $content;
+  }
+
+  public static function deactivate_subscriber(){
+    if (!current_user_can('manage_options')) wp_die('');
+    check_admin_referer('wpmps_deactivate_subscriber');
+    $uid = isset($_GET['user_id']) ? intval($_GET['user_id']) : 0;
+    if (function_exists('wpmps_log_admin')){
+      wpmps_log_admin('deactivate_subscriber_request', ['user_id'=>$uid]);
+    }
+    if ($uid && class_exists('WPMPS_Subscribers')){
+      WPMPS_Subscribers::deactivate_subscriber($uid, 'admin_manual');
+    }
+    wp_redirect(admin_url('admin.php?page=wpmps-subscribers'));
+    exit;
+  }
+
+  public static function change_to_pending(){
+    if (!current_user_can('manage_options')) wp_die('');
+    check_admin_referer('wpmps_change_to_pending');
+    $uid = isset($_GET['user_id']) ? intval($_GET['user_id']) : 0;
+    if (function_exists('wpmps_log_admin')){
+      wpmps_log_admin('change_to_pending_request', ['user_id'=>$uid]);
+    }
+    if ($uid && class_exists('WPMPS_Subscribers')){
+      WPMPS_Subscribers::change_to_pending_role($uid, 'mp_inactive');
+    }
+    wp_redirect(admin_url('admin.php?page=wpmps-subscribers'));
+    exit;
+  }
+
+  public static function cleanup_old_tokens(){
+    if (!current_user_can('manage_options')) wp_die('');
+    check_admin_referer('wpmps_cleanup_old_tokens');
+    
+    if (function_exists('wpmps_log_admin')){
+      wpmps_log_admin('cleanup_old_tokens_request', []);
+    }
+    
+    if (class_exists('WPMPS_Subscribers')){
+      $result = WPMPS_Subscribers::cleanup_old_token_data();
+      
+      if ($result['success']) {
+        $message = $result['message'];
+        if (!empty($result['errors'])) {
+          $message .= ' (Con algunos errores)';
+        }
+        wp_redirect(add_query_arg(['cleaned' => $result['cleaned_count']], admin_url('admin.php?page=wpmps-subscribers')));
+      } else {
+        wp_redirect(add_query_arg(['error' => urlencode($result['message'])], admin_url('admin.php?page=wpmps-subscribers')));
+      }
+    } else {
+      wp_redirect(admin_url('admin.php?page=wpmps-subscribers'));
+    }
+    exit;
   }
 }

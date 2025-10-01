@@ -4,62 +4,76 @@
 Este diagrama muestra cómo interactúan los componentes del plugin con WordPress y Mercado Pago durante el flujo de suscripción por preapproval, y dónde se registran los eventos (logger).
 
 ```mermaid
-flowchart LR
-  %% Secciones
+flowchart TD
+  USER[Usuario en WP]
+  PAGE[Página con shortcode]
+  
   subgraph WP[WordPress Plugin]
-    SC["Shortcode/Bloque\n(mp_subscribe)"]
-    RDR["Render y CTA\n(nocache_headers)"]
-    LNK["Generar checkout_url\n(plan_id normalizado)"]
-    LOG["[Logger\n(ring buffer + error_log)]"]
-    WH[("REST Webhook\n/wp-json/mp/v1/webhook")]
-    SUBS["Suscriptores\n(lista + refresh + CSV)"]
-    CFG[Ajustes\n(Token/CTA login/Rol)]
-    META[("user_meta:\n_suscripcion_activa\n_mp_preapproval_id\n_mp_plan_id\n_mp_updated_at")]
+    SC[Shortcode mp_subscribe]
+    AUTH{Usuario logueado?}
+    LOGIN[Redirect a login]
+    RENDER[Generar botón]
+    WH[REST Webhook]
+    META[Actualizar user_meta]
+    ROLE[Sincronizar rol]
+    LOG[Sistema de Logs]
   end
 
   subgraph MP[Mercado Pago]
-    API[(API MP)]
-    CO{{Checkout\nPreapproval}}
+    CHECKOUT[Checkout Preapproval]
+    API[API MP]
   end
 
-  %% Render y clic
-  SC --> RDR
-  RDR -->|usuario sin login| LOG
-  RDR -->|link a login| RDR
-  RDR -->|usuario logueado| LNK
-
-  %% Link directo
-  LNK -->|checkout_url| CO
-  LNK -.log CREATE plan/checkout.-> LOG
-
-  %% Webhook
-  CO -->|autoriza/cancela| API
-  API -->|POST webhook\n{id | data.id}| WH
-  WH -->|GET /preapproval/{id}\nrevalidar estado| API
+  USER --> PAGE
+  PAGE --> SC
+  SC --> AUTH
+  AUTH -->|No| LOGIN
+  AUTH -->|Si| RENDER
+  LOGIN -.-> AUTH
+  RENDER --> CHECKOUT
+  
+  CHECKOUT --> API
+  API --> WH
+  WH --> API
   WH --> META
-  META --> SUBS
-  WH -.log WEBHOOK id/estado/http.-> LOG
-
-  %% Shortcode logs
-  RDR -.log USER ctx=shortcode\n(is_user_logged_in, user_id/email,\nuri, referer, cache_hint).-> LOG
-
-  %% Notas
-  classDef note fill:#eef,stroke:#99c,color:#333;
-  SEC(["Seguridad: HTTPS, usuarios logueados,\nsanitización/escape, sin tokens/PII en logs"]):::note
-  CCH(["Planes cacheados con transient (20 min)"]):::note
-  CFG --- SEC
-  SUBS --- CCH
+  META --> ROLE
+  
+  AUTH -.-> LOG
+  RENDER -.-> LOG
+  CHECKOUT -.-> LOG
+  WH -.-> LOG
+  META -.-> LOG
+  
+  classDef wp fill:#e1f5fe,stroke:#0277bd
+  classDef mp fill:#fff3e0,stroke:#f57c00
+  classDef log fill:#f3e5f5,stroke:#7b1fa2
+  classDef user fill:#e8f5e8,stroke:#2e7d32
+  
+  class SC,AUTH,LOGIN,RENDER,WH,META,ROLE wp
+  class CHECKOUT,API mp
+  class LOG log
+  class USER,PAGE user
 ```
 
 ### Datos que fluyen
-- payer_email: del usuario WP logueado (para logging y webhook).
-- preapproval_plan_id: aportado por el shortcode/bloque.
-- checkout_url: enlace generado a partir de dominio + preapproval_plan_id.
-- preapproval_id: ID devuelto por MP y usado en webhook.
-- status: authorized/paused/cancelled.
+- **payer_email**: del usuario WP logueado (para logging y webhook)
+- **preapproval_plan_id**: aportado por el shortcode/bloque
+- **checkout_url**: enlace generado a partir de dominio + preapproval_plan_id
+- **preapproval_id**: ID devuelto por MP y usado en webhook
+- **status**: authorized/paused/cancelled
+
+### Canales de Log (Nuevo Sistema)
+- **AUTH**: Eventos de autenticación (login requerido)
+- **BUTTON**: Renderización de shortcodes y generación de links
+- **CHECKOUT**: Interacciones con API de Mercado Pago
+- **WEBHOOK**: Procesamiento de webhooks de MP
+- **SUBSCRIPTION**: Cambios de estado y roles de suscripción
+- **ADMIN**: Acciones administrativas
+- **ERROR**: Errores críticos con códigos específicos
 
 ### Seguridad
-- Requiere usuario logueado para mostrar el botón (evita accesos anónimos).
-- HTTPS en sitio y Webhook.
-- Sanitización/escape en inputs/outputs y normalización de `plan_id`.
-- Logger filtra potenciales secretos y no guarda tokens.
+- Requiere usuario logueado para mostrar el botón (evita accesos anónimos)
+- HTTPS en sitio y Webhook
+- Sanitización/escape en inputs/outputs y normalización de `plan_id`
+- Logger filtra potenciales secretos y no guarda tokens
+- Ring buffer de 500 eventos máximo para evitar crecimiento descontrolado

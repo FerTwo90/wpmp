@@ -7,10 +7,11 @@ $items = class_exists('WPMPS_Logger') ? WPMPS_Logger::filtered(['channel'=>$chan
 
 <form method="get" style="margin-top:10px;">
   <input type="hidden" name="page" value="wpmps-logs" />
+  <?php $channels = ['AUTH','BUTTON','CHECKOUT','WEBHOOK','SUBSCRIPTION','ADMIN','ERROR']; ?>
   <label><?php _e('Canal','wp-mp-subscriptions'); ?>
     <select name="channel">
       <option value="">— <?php _e('Todos','wp-mp-subscriptions'); ?> —</option>
-      <?php foreach (['USER','CREATE','WEBHOOK','ERROR','DEBUG'] as $ch): ?>
+      <?php foreach ($channels as $ch): ?>
         <option value="<?php echo esc_attr($ch); ?>" <?php selected(strtoupper($channel), $ch); ?>><?php echo esc_html($ch); ?></option>
       <?php endforeach; ?>
     </select>
@@ -32,7 +33,6 @@ $items = class_exists('WPMPS_Logger') ? WPMPS_Logger::filtered(['channel'=>$chan
     <th><?php _e('User ID','wp-mp-subscriptions'); ?></th>
     <th><?php _e('Email','wp-mp-subscriptions'); ?></th>
     <th><?php _e('Resumen','wp-mp-subscriptions'); ?></th>
-    <th><?php _e('Acciones','wp-mp-subscriptions'); ?></th>
   </tr></thead>
   <tbody>
     <?php if (empty($items)): ?>
@@ -51,27 +51,28 @@ $items = class_exists('WPMPS_Logger') ? WPMPS_Logger::filtered(['channel'=>$chan
               'method','path','http_code','ok','mp_error','mp_message','mp_error_desc','mp_cause_code','mp_cause_desc',
               'role_applied','roles_before','roles_after',
               'init_point','preapproval_id','status','plan_id','amount','currency','back','back_url',
-              'state','reason','uri','cache_hint','body_raw_preview','request_id'
+              'query_string','query_args',
+              'state','reason','uri','full_url','http_referer','remote_addr','user_agent','cache_hint','body_raw_preview','request_id'
             ];
             $parts = [];
             foreach ($keys as $k){
               if (!isset($e[$k]) || $e[$k] === '' || $e[$k] === null) continue;
               $val = $e[$k];
               if (is_array($val)){
-                // Render simple arrays (like roles) as comma-separated
-                $val = implode(',', array_map('strval', $val));
+                $val = wp_json_encode($val);
               } elseif (!is_scalar($val)) {
                 $val = '';
+              }
+              if (is_string($val)) {
+                $val = trim($val);
+                if (strlen($val) > 300) {
+                  $val = substr($val, 0, 297).'...';
+                }
               }
               if ($val !== '') $parts[] = $k.': '.$val;
             }
             echo esc_html(implode(' | ', $parts));
           ?>
-        </td>
-        <td>
-          <?php if (!empty($e['preapproval_id'])): ?>
-            <a class="button" href="<?php echo esc_url( wp_nonce_url( admin_url('admin-post.php?action=wpmps_reprocess&preapproval_id='.rawurlencode($e['preapproval_id'])), 'wpmps_reprocess') ); ?>"><?php _e('Reprocesar','wp-mp-subscriptions'); ?></a>
-          <?php endif; ?>
         </td>
       </tr>
     <?php endforeach; endif; ?>

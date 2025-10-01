@@ -1,6 +1,6 @@
 <?php
 /**
- * Plugin Name: AATestIntegracion MP WP — (by Devecoop)
+ * Plugin Name: Subscripciones mercadopago — (by Devecoop)
   * Description: Suscripciones con Mercado Pago: botón → redirección segura → webhook que valida y otorga acceso.
  * Version: 0.3.3
  * Author: Devecoop
@@ -28,6 +28,7 @@ require_once WPMPS_DIR.'includes/shortcodes.php';
 require_once WPMPS_DIR.'includes/routes.php';
 require_once WPMPS_DIR.'includes/class-wpmps-sync.php';
 require_once WPMPS_DIR.'includes/class-wpmps-subscribers.php';
+require_once WPMPS_DIR.'includes/class-wpmps-cron.php';
 require_once WPMPS_DIR.'admin/class-wpmps-admin.php';
 require_once WPMPS_DIR.'admin/class-wpmps-logs.php';
 // Ajustes (opcional)

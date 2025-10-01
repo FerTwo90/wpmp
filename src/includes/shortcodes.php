@@ -48,39 +48,30 @@ function wpmps_render_subscribe_shortcode($atts){
   $class   = sanitize_html_class($a['class']);
 
   if (!is_user_logged_in()){
-    $ctx = wpmps_collect_context('shortcode', ['state'=>'not_logged']);
-    wpmps_log('USER', $ctx);
+    wpmps_log_auth('required', ['plan_id' => $plan_id, 'redirect_url' => wpmps_current_url()]);
     $cta_text = get_option('wpmps_login_cta_text', __('Iniciá sesión para suscribirte','wp-mp-subscriptions'));
     $login_url = wp_login_url(wpmps_current_url());
     return '<a class="'.esc_attr($class).'" href="'.esc_url($login_url).'">'.esc_html($cta_text).'</a>';
   }
 
   // User present: log and build Mercado Pago link
-  $ctx = wpmps_collect_context('shortcode', ['state'=>'logged','plan_id'=>$plan_id]);
-  wpmps_log('USER', $ctx);
+  wpmps_log_button('render', ['plan_id' => $plan_id, 'user_logged' => true]);
 
   if (empty($plan_id)){
-    wpmps_log('ERROR', wpmps_collect_context('shortcode', ['reason'=>'missing_plan']));
+    wpmps_log_error('shortcode', 'missing_plan', 'Plan ID is required for subscription button');
     return '<span class="'.esc_attr($class).'">'.esc_html__('Falta plan_id','wp-mp-subscriptions').'</span>';
   }
 
   $normalized = function_exists('wpmps_extract_plan_id') ? wpmps_extract_plan_id($plan_id) : $plan_id;
   $checkout = function_exists('wpmps_mp_checkout_url') ? wpmps_mp_checkout_url($normalized) : '';
-  wpmps_log('CREATE', wpmps_collect_context('link', [
+  wpmps_log_button('link_generated', [
     'plan_id_raw'   => $plan_id,
     'plan_id'       => $normalized,
     'checkout_url'  => $checkout,
-  ]));
+  ]);
 
   $attrs = ' class="'.esc_attr($class).'"';
-  $name = ' name="MP-payButton"';
-  $html = '<a href="'.esc_url($checkout).'"'.$name.$attrs.'>'.esc_html($label).'</a>';
-
-  static $render_loaded = false;
-  if (!$render_loaded){
-    $html .= '<script type="text/javascript">(function(){function l(){if(window.$MPC_loaded===true)return;var s=document.createElement("script");s.type="text/javascript";s.async=true;s.src=(("https:"==document.location.protocol)?"https":"http")+"://secure.mlstatic.com/mptools/render.js";var x=document.getElementsByTagName("script")[0];x.parentNode.insertBefore(s,x);window.$MPC_loaded=true;}if(window.$MPC_loaded!==true){if(window.attachEvent){window.attachEvent("onload",l);}else{window.addEventListener("load",l,false);}}})();</script>';
-    $render_loaded = true;
-  }
+  $html = '<a href="'.esc_url($checkout).'"'.$attrs.'>'.esc_html($label).'</a>';
 
   return $html;
 }

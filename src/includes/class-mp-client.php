@@ -25,8 +25,8 @@ class WPMPS_MP_Client {
       'has_plan_id' => !empty($payload['preapproval_plan_id']),
       'has_auto_recurring' => !empty($payload['auto_recurring']),
     ];
-    if (function_exists('wpmps_collect_context') && function_exists('wpmps_log')){
-      wpmps_log('CREATE', wpmps_collect_context('http_before', $preview));
+    if (function_exists('wpmps_log_checkout')){
+      wpmps_log_checkout('api_request', $preview);
     }
     $res = wp_remote_post($this->api.'/preapproval', [
       'headers' => $this->headers(true),
@@ -34,29 +34,29 @@ class WPMPS_MP_Client {
       'timeout' => 20
     ]);
     $out = $this->normalize_response($res);
-    if (function_exists('wpmps_collect_context') && function_exists('wpmps_log')){
-      wpmps_log('CREATE', wpmps_collect_context('http_after', [
+    if (function_exists('wpmps_log_checkout')){
+      wpmps_log_checkout('api_response', [
         'method'=>'POST','path'=>'/preapproval','http_code'=>$out['http'] ?? 0
-      ]));
+      ]);
     }
     return $out;
   }
 
   public function get_preapproval($id){
-    if (function_exists('wpmps_collect_context') && function_exists('wpmps_log')){
-      wpmps_log('WEBHOOK', wpmps_collect_context('http_before', [
-        'method'=>'GET','path'=>'/preapproval/{id}','id'=> sanitize_text_field($id)
-      ]));
+    if (function_exists('wpmps_log_webhook')){
+      wpmps_log_webhook('validate_request', [
+        'method'=>'GET','path'=>'/preapproval/{id}','preapproval_id'=> sanitize_text_field($id)
+      ]);
     }
     $res = wp_remote_get($this->api.'/preapproval/'.rawurlencode($id), [
       'headers' => $this->headers(),
       'timeout' => 20
     ]);
     $out = $this->normalize_response($res);
-    if (function_exists('wpmps_collect_context') && function_exists('wpmps_log')){
-      wpmps_log('WEBHOOK', wpmps_collect_context('http_after', [
+    if (function_exists('wpmps_log_webhook')){
+      wpmps_log_webhook('validate_response', [
         'method'=>'GET','path'=>'/preapproval/{id}','http_code'=>$out['http'] ?? 0
-      ]));
+      ]);
     }
     return $out;
   }
@@ -64,8 +64,8 @@ class WPMPS_MP_Client {
   private function normalize_response($res){
     if (is_wp_error($res)) {
       $err = ['code'=>$res->get_error_code(), 'message'=>$res->get_error_message()];
-      if (function_exists('wpmps_collect_context') && function_exists('wpmps_log')){
-        wpmps_log('ERROR', wpmps_collect_context('http_error', $err));
+      if (function_exists('wpmps_log_error')){
+        wpmps_log_error('mp_client', $err['code'], $err['message']);
       }
       return ['http'=>0,'body'=>['error'=>$res->get_error_message()]];
     }
@@ -108,10 +108,31 @@ class WPMPS_MP_Client {
   public function search_preapprovals($params = []){
     $query = http_build_query($params);
     $url = $this->api.'/preapproval/search'.($query?('?'.$query):'');
+    
+    // Log the request
+    if (function_exists('wpmps_log_admin')){
+      wpmps_log_admin('mp_search_preapprovals_request', [
+        'url' => $url,
+        'params' => $params
+      ]);
+    }
+    
     $res = wp_remote_get($url, [
       'headers' => $this->headers(),
       'timeout' => 20
     ]);
-    return $this->normalize_response($res);
+    
+    $normalized = $this->normalize_response($res);
+    
+    // Log the response
+    if (function_exists('wpmps_log_admin')){
+      wpmps_log_admin('mp_search_preapprovals_response', [
+        'http_code' => $normalized['http'] ?? 0,
+        'has_body' => !empty($normalized['body']),
+        'body_keys' => is_array($normalized['body'] ?? null) ? array_keys($normalized['body']) : 'not_array'
+      ]);
+    }
+    
+    return $normalized;
   }
 }
