@@ -37,6 +37,7 @@ class WPMPS_Admin {
     add_submenu_page('wpmps', __('Mail', 'wp-mp-subscriptions'), __('Mail', 'wp-mp-subscriptions'), $cap, 'wpmps-mail', [__CLASS__, 'render_mail']);
     add_submenu_page('wpmps', __('Cron', 'wp-mp-subscriptions'), __('Cron', 'wp-mp-subscriptions'), $cap, 'wpmps-cron', [__CLASS__, 'render_cron']);
     add_submenu_page('wpmps', __('Logs', 'wp-mp-subscriptions'), __('Logs', 'wp-mp-subscriptions'), $cap, 'wpmps-logs', [__CLASS__, 'render_logs']);
+    add_submenu_page('wpmps', __('Pagos y Suscripciones', 'wp-mp-subscriptions'), __('Pagos y Suscripciones', 'wp-mp-subscriptions'), $cap, 'wpmps-pagos-y-suscripciones', [__CLASS__, 'render_pagos_y_suscripciones']);
   }
 
   private static function view($name, $vars = []){
@@ -58,6 +59,7 @@ class WPMPS_Admin {
       'wpmps-mail'       => __('Mail','wp-mp-subscriptions'),
       'wpmps-cron'       => __('Cron','wp-mp-subscriptions'),
       'wpmps-logs'       => __('Logs','wp-mp-subscriptions'),
+      'wpmps-pagos-y-suscripciones' => __('Pagos y Suscripciones','wp-mp-subscriptions'),
     ];
     echo '<h1 class="nav-tab-wrapper">';
     foreach ($tabs as $slug=>$label){
