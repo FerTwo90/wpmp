@@ -13,6 +13,9 @@ class WPMPS_Admin {
     add_action('admin_post_wpmps_deactivate_subscriber', [__CLASS__, 'deactivate_subscriber']);
     add_action('admin_post_wpmps_change_to_pending', [__CLASS__, 'change_to_pending']);
     add_action('admin_post_wpmps_cleanup_old_tokens', [__CLASS__, 'cleanup_old_tokens']);
+    add_action('admin_post_wpmps_clear_cache', [__CLASS__, 'clear_cache']);
+    add_action('admin_post_wpmps_refresh_background', [__CLASS__, 'refresh_background']);
+    add_action('admin_post_wpmps_clear_payments_cache', [__CLASS__, 'clear_payments_cache']);
     add_filter('default_content', [__CLASS__, 'maybe_inject_shortcode'], 10, 2);
   }
 
@@ -30,6 +33,7 @@ class WPMPS_Admin {
     add_submenu_page('wpmps', __('Ajustes', 'wp-mp-subscriptions'), __('Ajustes', 'wp-mp-subscriptions'), $cap, 'wpmps-settings', [__CLASS__, 'render_settings']);
     add_submenu_page('wpmps', __('Planes', 'wp-mp-subscriptions'), __('Planes', 'wp-mp-subscriptions'), $cap, 'wpmps-plans', [__CLASS__, 'render_plans']);
     add_submenu_page('wpmps', __('Suscriptores', 'wp-mp-subscriptions'), __('Suscriptores', 'wp-mp-subscriptions'), $cap, 'wpmps-subscribers', [__CLASS__, 'render_subscribers']);
+    add_submenu_page('wpmps', __('Pagos MP', 'wp-mp-subscriptions'), __('Pagos MP', 'wp-mp-subscriptions'), $cap, 'wpmps-payments', [__CLASS__, 'render_payments']);
     add_submenu_page('wpmps', __('Mail', 'wp-mp-subscriptions'), __('Mail', 'wp-mp-subscriptions'), $cap, 'wpmps-mail', [__CLASS__, 'render_mail']);
     add_submenu_page('wpmps', __('Cron', 'wp-mp-subscriptions'), __('Cron', 'wp-mp-subscriptions'), $cap, 'wpmps-cron', [__CLASS__, 'render_cron']);
     add_submenu_page('wpmps', __('Logs', 'wp-mp-subscriptions'), __('Logs', 'wp-mp-subscriptions'), $cap, 'wpmps-logs', [__CLASS__, 'render_logs']);
@@ -50,6 +54,7 @@ class WPMPS_Admin {
       'wpmps-settings'   => __('Ajustes','wp-mp-subscriptions'),
       'wpmps-plans'      => __('Planes','wp-mp-subscriptions'),
       'wpmps-subscribers'=> __('Suscriptores','wp-mp-subscriptions'),
+      'wpmps-payments'   => __('Pagos MP','wp-mp-subscriptions'),
       'wpmps-mail'       => __('Mail','wp-mp-subscriptions'),
       'wpmps-cron'       => __('Cron','wp-mp-subscriptions'),
       'wpmps-logs'       => __('Logs','wp-mp-subscriptions'),
@@ -148,6 +153,39 @@ class WPMPS_Admin {
     echo '</div>';
   }
 
+  public static function render_payments(){
+    if (!current_user_can('manage_options')) return;
+    
+    // Log start of render
+    if (function_exists('wpmps_log_admin')){
+      wpmps_log_admin('render_payments_start', []);
+    }
+    
+    // Get filter parameters
+    $filters = array_filter([
+      'status' => isset($_GET['filter_status']) ? sanitize_text_field($_GET['filter_status']) : '',
+      'match_type' => isset($_GET['filter_match']) ? sanitize_text_field($_GET['filter_match']) : '',
+      'email' => isset($_GET['filter_email']) ? sanitize_text_field($_GET['filter_email']) : '',
+      'amount_min' => isset($_GET['filter_amount_min']) ? sanitize_text_field($_GET['filter_amount_min']) : '',
+      'amount_max' => isset($_GET['filter_amount_max']) ? sanitize_text_field($_GET['filter_amount_max']) : '',
+      'plan_id' => isset($_GET['filter_plan_id']) ? sanitize_text_field($_GET['filter_plan_id']) : '',
+      'plan_name' => isset($_GET['filter_plan_name']) ? sanitize_text_field($_GET['filter_plan_name']) : ''
+    ]);
+    
+    $payments_data = WPMPS_Payments::get_filtered_payments($filters);
+    $stats = WPMPS_Payments::get_payments_stats($payments_data);
+    
+    echo '<div class="wrap">';
+    echo '<h1>'.esc_html__('Pagos de MercadoPago', 'wp-mp-subscriptions').'</h1>';
+    self::tabs('wpmps-payments');
+    self::view('payments', [
+      'payments_data' => $payments_data,
+      'stats' => $stats,
+      'filters' => $filters
+    ]);
+    echo '</div>';
+  }
+
   public static function render_logs(){
     if (!current_user_can('manage_options')) return;
     $events = get_option('wpmps_webhook_events', []);
@@ -199,6 +237,8 @@ class WPMPS_Admin {
     }
     if ($uid){
       WPMPS_Subscribers::refresh_subscriber($uid);
+      // Limpiar caché después de actualizar
+      WPMPS_Subscribers::clear_cache();
     }
     wp_redirect(admin_url('admin.php?page=wpmps-subscribers'));
     exit;
@@ -210,16 +250,14 @@ class WPMPS_Admin {
     if (function_exists('wpmps_log_admin')){
       wpmps_log_admin('refresh_all_subscribers', []);
     }
-    $subs = WPMPS_Subscribers::get_subscribers();
-    $count = 0;
-    foreach ($subs as $s){
-      if (!empty($s['user_id'])){
-        WPMPS_Subscribers::refresh_subscriber(intval($s['user_id']));
-        $count++;
-        if ($count >= 200) break; // protección simple
-      }
-    }
-    wp_redirect(admin_url('admin.php?page=wpmps-subscribers'));
+    
+    // Limpiar caché primero para obtener datos frescos
+    WPMPS_Subscribers::clear_cache();
+    
+    // Usar método optimizado que limita las llamadas MP
+    $updated = WPMPS_Subscribers::refresh_subscribers_background(20); // Máximo 20 usuarios
+    
+    wp_redirect(add_query_arg('refreshed', $updated, admin_url('admin.php?page=wpmps-subscribers')));
     exit;
   }
 
@@ -355,6 +393,48 @@ class WPMPS_Admin {
     } else {
       wp_redirect(admin_url('admin.php?page=wpmps-subscribers'));
     }
+    exit;
+  }
+
+  public static function clear_cache(){
+    if (!current_user_can('manage_options')) wp_die('');
+    check_admin_referer('wpmps_clear_cache');
+    
+    if (function_exists('wpmps_log_admin')){
+      wpmps_log_admin('clear_cache_request', []);
+    }
+    
+    WPMPS_Subscribers::clear_cache();
+    
+    wp_redirect(add_query_arg('cache_cleared', 1, admin_url('admin.php?page=wpmps-subscribers')));
+    exit;
+  }
+
+  public static function refresh_background(){
+    if (!current_user_can('manage_options')) wp_die('');
+    check_admin_referer('wpmps_refresh_background');
+    
+    if (function_exists('wpmps_log_admin')){
+      wpmps_log_admin('refresh_background_request', []);
+    }
+    
+    $updated = WPMPS_Subscribers::refresh_subscribers_background(10);
+    
+    wp_redirect(add_query_arg('background_updated', $updated, admin_url('admin.php?page=wpmps-subscribers')));
+    exit;
+  }
+
+  public static function clear_payments_cache(){
+    if (!current_user_can('manage_options')) wp_die('');
+    check_admin_referer('wpmps_clear_payments_cache');
+    
+    if (function_exists('wpmps_log_admin')){
+      wpmps_log_admin('clear_payments_cache_request', []);
+    }
+    
+    WPMPS_Payments::clear_cache();
+    
+    wp_redirect(add_query_arg('payments_cache_cleared', 1, admin_url('admin.php?page=wpmps-payments')));
     exit;
   }
 }

@@ -8,14 +8,17 @@ y este proyecto adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 ## [Unreleased]
 
 ### Added
-- Sistema de cron automático para verificación periódica de suscripciones cada 15 minutos
+- Sistema de cron automático para sincronización MP ↔ WordPress cada 15 minutos
 - Nueva pestaña "Cron" en el panel de administración con controles y estado
 - Endpoint de prueba `/wp-json/mp/v1/webhook-test` para debugging
 - Logging mejorado del webhook con información detallada del request
 - Rate limiting en verificaciones de cron para evitar sobrecarga de la API de MP
+- Sincronización inteligente que detecta desajustes entre estado MP y roles WP
 
 ### Changed
 - Mejorada la captura de datos del webhook con múltiples métodos de extracción del preapproval_id
+- El cron ahora sincroniza específicamente estado de suscripción MP con roles de usuario
+- Lógica de sincronización más robusta que detecta y corrige desincronizaciones
 - El sistema ahora es menos dependiente de webhooks de Mercado Pago
 
 ### Fixed

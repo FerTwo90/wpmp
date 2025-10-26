@@ -34,6 +34,7 @@ function wpmps_render_settings_inner(){
   $webhook     = home_url('/wp-json/mp/v1/webhook');
   $const_token = (defined('MP_ACCESS_TOKEN') && !empty(MP_ACCESS_TOKEN)) ? MP_ACCESS_TOKEN : '';
   $opt_token   = get_option('wpmps_access_token', '');
+
   $roles       = function_exists('get_editable_roles') ? get_editable_roles() : [];
   $saved_role  = get_option('wpmps_role_on_authorized', '');
   if ($saved_role === 1 || $saved_role === '1') {
@@ -53,6 +54,8 @@ function wpmps_render_settings_inner(){
       update_option('wpmps_access_token', $new, false);
       $opt_token = $new;
     }
+
+
 
     if (isset($_POST['wpmps_mp_domain'])){
       $dom = sanitize_text_field(wp_unslash($_POST['wpmps_mp_domain']));
@@ -111,7 +114,10 @@ function wpmps_render_settings_inner(){
   if (!empty($const_token)) {
     echo '<p class="description">'.esc_html__('Actualmente se usa el token definido por constante (tiene prioridad).', 'wp-mp-subscriptions').' '.esc_html__('Valor (oculto):', 'wp-mp-subscriptions').' '.esc_html($masked).'</p>';
   }
+  echo '<p class="description">'.esc_html__('Para backend/webhooks. Formato: APP_USR-xxxxxxxx-xxxxxx', 'wp-mp-subscriptions').'</p>';
   echo '</td></tr>';
+
+
 
   echo '<tr><th>'.esc_html__('Rol asignado al usuario cuando se confirme la suscripción', 'wp-mp-subscriptions').'</th><td>';
   echo '<select id="wpmps_role_on_authorized" name="wpmps_role_on_authorized" class="regular-text">';
@@ -160,6 +166,8 @@ function wpmps_render_settings_inner(){
           }
         });
       }
+
+
     })();
   </script>';
 

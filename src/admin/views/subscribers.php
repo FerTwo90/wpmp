@@ -12,6 +12,24 @@
   </div>
 <?php endif; ?>
 
+<?php if (isset($_GET['cache_cleared'])): ?>
+  <div class="notice notice-success is-dismissible">
+    <p><?php _e('Caché de suscriptores limpiado correctamente.', 'wp-mp-subscriptions'); ?></p>
+  </div>
+<?php endif; ?>
+
+<?php if (isset($_GET['refreshed'])): ?>
+  <div class="notice notice-success is-dismissible">
+    <p><?php printf(__('Se actualizaron %d suscriptores en background.', 'wp-mp-subscriptions'), intval($_GET['refreshed'])); ?></p>
+  </div>
+<?php endif; ?>
+
+<?php if (isset($_GET['background_updated'])): ?>
+  <div class="notice notice-success is-dismissible">
+    <p><?php printf(__('Se actualizaron %d suscriptores en background.', 'wp-mp-subscriptions'), intval($_GET['background_updated'])); ?></p>
+  </div>
+<?php endif; ?>
+
 <?php
 // Get filter parameters
 $filter_status = isset($_GET['filter_status']) ? sanitize_text_field($_GET['filter_status']) : '';
@@ -30,10 +48,30 @@ $filters = array_filter([
   'email' => $filter_email
 ]);
 
-// Debug info
+// Debug info y estado del caché
 $original_count = count($subs);
-$debug_info = "Original: $original_count suscriptores";
+$cache_data = get_transient('wpmps_subscribers_cache');
+$cache_status = $cache_data !== false ? 'activo' : 'vacío';
+$cache_count = $cache_data !== false ? count($cache_data) : 0;
+$cache_age = '';
 
+if ($cache_data !== false) {
+  // Intentar determinar la edad del caché basándose en los datos
+  $fresh_count = 0;
+  $cached_count = 0;
+  foreach ($subs as $sub) {
+    if (isset($sub['cache_status'])) {
+      if ($sub['cache_status'] === 'fresh_from_mp') {
+        $fresh_count++;
+      } elseif ($sub['cache_status'] === 'from_user_cache') {
+        $cached_count++;
+      }
+    }
+  }
+  $cache_age = " | Frescos: $fresh_count, Cacheados: $cached_count";
+}
+
+$debug_info = "Total: $original_count suscriptores | Caché: $cache_status ($cache_count)$cache_age";
 
 if (!empty($subs)) {
   $debug_info .= " | Primer email: " . ($subs[0]['email'] ?? 'N/A');
@@ -87,14 +125,24 @@ if (!empty($filters)) {
   </div>
 </form>
 
-<p>
-  <a href="<?php echo esc_url(wp_nonce_url(admin_url('admin-post.php?action=wpmps_export_csv'), 'wpmps_export_csv')); ?>" class="button">CSV</a>
-  <a href="<?php echo esc_url(wp_nonce_url(admin_url('admin-post.php?action=wpmps_refresh_all'), 'wpmps_refresh_all')); ?>" class="button"><?php _e('Refrescar todos','wp-mp-subscriptions'); ?></a>
-  <span style="margin-left: 20px; color: #666;">
+<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px;">
+  <div>
+    <a href="<?php echo esc_url(wp_nonce_url(admin_url('admin-post.php?action=wpmps_export_csv'), 'wpmps_export_csv')); ?>" class="button">📊 CSV</a>
+    <a href="<?php echo esc_url(wp_nonce_url(admin_url('admin-post.php?action=wpmps_refresh_all'), 'wpmps_refresh_all')); ?>" class="button">🔄 <?php _e('Refrescar (Lote)','wp-mp-subscriptions'); ?></a>
+    <a href="<?php echo esc_url(wp_nonce_url(admin_url('admin-post.php?action=wpmps_refresh_background'), 'wpmps_refresh_background')); ?>" class="button">⚡ <?php _e('Actualizar Background','wp-mp-subscriptions'); ?></a>
+    <a href="<?php echo esc_url(wp_nonce_url(admin_url('admin-post.php?action=wpmps_clear_cache'), 'wpmps_clear_cache')); ?>" class="button button-secondary">🗑️ <?php _e('Limpiar Caché','wp-mp-subscriptions'); ?></a>
+  </div>
+  
+  <div style="text-align: right; color: #666;">
     <?php printf(__('Mostrando %d suscriptores', 'wp-mp-subscriptions'), count($subs)); ?>
     <br><small style="color: #999;"><?php echo esc_html($debug_info); ?></small>
-  </span>
-</p>
+    <?php if ($cache_data !== false): ?>
+      <br><small style="color: #0073aa;">💾 <?php _e('Datos desde caché (5 min TTL)', 'wp-mp-subscriptions'); ?></small>
+    <?php else: ?>
+      <br><small style="color: #d63638;">🔄 <?php _e('Datos frescos (sin caché)', 'wp-mp-subscriptions'); ?></small>
+    <?php endif; ?>
+  </div>
+</div>
   <table class="widefat fixed striped">
     <thead><tr>
       <th><?php _e('Email','wp-mp-subscriptions'); ?></th>

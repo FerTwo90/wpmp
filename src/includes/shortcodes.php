@@ -7,7 +7,7 @@ add_action('init', function(){
   add_shortcode('mp_subscribe', 'wpmps_render_subscribe_shortcode');
 
   // Register block if metadata exists
-  if (function_exists('register_block_type_from_metadata')){
+  if (function_exists('register_block_type_from_metadata') && defined('WPMPS_DIR')){
     $meta_dir = WPMPS_DIR.'blocks/subscribe-button';
     if (file_exists($meta_dir.'/block.json')){
       register_block_type_from_metadata($meta_dir, [
@@ -29,6 +29,11 @@ add_action('init', function(){
 
 // Shortcode implementation
 function wpmps_render_subscribe_shortcode($atts){
+  // Verificar que las funciones necesarias están disponibles
+  if (!function_exists('wpmps_current_url') || !function_exists('wpmps_log_button')) {
+    return '<span style="color: red;">[Error: Plugin functions not loaded]</span>';
+  }
+
   // Soft no-cache headers to avoid CDN caching of session-dependent content
   if (!headers_sent()) {
     nocache_headers();
@@ -48,30 +53,41 @@ function wpmps_render_subscribe_shortcode($atts){
   $class   = sanitize_html_class($a['class']);
 
   if (!is_user_logged_in()){
-    wpmps_log_auth('required', ['plan_id' => $plan_id, 'redirect_url' => wpmps_current_url()]);
+    if (function_exists('wpmps_log_auth')) {
+      wpmps_log_auth('required', ['plan_id' => $plan_id, 'redirect_url' => wpmps_current_url()]);
+    }
     $cta_text = get_option('wpmps_login_cta_text', __('Iniciá sesión para suscribirte','wp-mp-subscriptions'));
     $login_url = wp_login_url(wpmps_current_url());
     return '<a class="'.esc_attr($class).'" href="'.esc_url($login_url).'">'.esc_html($cta_text).'</a>';
   }
 
   // User present: log and build Mercado Pago link
-  wpmps_log_button('render', ['plan_id' => $plan_id, 'user_logged' => true]);
+  if (function_exists('wpmps_log_button')) {
+    wpmps_log_button('render', ['plan_id' => $plan_id, 'user_logged' => true]);
+  }
 
   if (empty($plan_id)){
-    wpmps_log_error('shortcode', 'missing_plan', 'Plan ID is required for subscription button');
+    if (function_exists('wpmps_log_error')) {
+      wpmps_log_error('shortcode', 'missing_plan', 'Plan ID is required for subscription button');
+    }
     return '<span class="'.esc_attr($class).'">'.esc_html__('Falta plan_id','wp-mp-subscriptions').'</span>';
   }
 
   $normalized = function_exists('wpmps_extract_plan_id') ? wpmps_extract_plan_id($plan_id) : $plan_id;
   $checkout = function_exists('wpmps_mp_checkout_url') ? wpmps_mp_checkout_url($normalized) : '';
-  wpmps_log_button('link_generated', [
-    'plan_id_raw'   => $plan_id,
-    'plan_id'       => $normalized,
-    'checkout_url'  => $checkout,
-  ]);
+  
+  if (function_exists('wpmps_log_button')) {
+    wpmps_log_button('link_generated', [
+      'plan_id_raw'   => $plan_id,
+      'plan_id'       => $normalized,
+      'checkout_url'  => $checkout,
+    ]);
+  }
 
-  $attrs = ' class="'.esc_attr($class).'"';
-  $html = '<a href="'.esc_url($checkout).'"'.$attrs.'>'.esc_html($label).'</a>';
+  // Simple redirect approach - no modal, no complex JS
+  $html = '<a href="'.esc_url($checkout).'" class="'.esc_attr($class).'" target="_blank" rel="noopener noreferrer">'.esc_html($label).'</a>';
 
   return $html;
 }
+
+// Simple redirect approach - no complex modal functionality needed

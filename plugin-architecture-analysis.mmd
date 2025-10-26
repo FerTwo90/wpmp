@@ -1,0 +1,170 @@
+graph TB
+    %% ARQUITECTURA DEL PLUGIN WP-MP-SUBSCRIPTIONS
+    
+    subgraph "🔧 CORE PLUGIN"
+        MAIN[wp-mp-subscriptions.php<br/>📋 Plugin Principal<br/>- Define constantes<br/>- Carga clases<br/>- Hooks básicos]
+        
+        HELPERS[helpers.php<br/>🛠️ Funciones Utilitarias<br/>- wpmps_get_access_token<br/>- wpmps_log_* functions<br/>- wpmps_collect_context]
+        
+        SETTINGS[settings.php<br/>⚙️ Configuración<br/>- Página de ajustes<br/>- Token MP<br/>- Roles de usuario]
+    end
+    
+    subgraph "📡 API & COMUNICACIÓN"
+        MPCLIENT[class-mp-client.php<br/>🌐 Cliente MercadoPago<br/>- create_preapproval ❌ NO USADO<br/>- get_preapproval ✅ FUNCIONA<br/>- search_preapproval_plans ❌ FALLA<br/>- search_preapprovals ✅ FUNCIONA<br/>- search_payments ✅ FUNCIONA]
+        
+        ROUTES[routes.php<br/>🛣️ Endpoints REST<br/>- /wp-json/mp/v1/webhook ✅<br/>- /wp-json/mp/v1/webhook-test ✅<br/>- AJAX postmessage handlers ✅<br/>- template_redirect finalización ✅]
+        
+        WEBHOOK[🔔 Webhook Handler<br/>wpmps_handle_webhook<br/>- Procesa notificaciones MP<br/>- Actualiza metadata usuario<br/>- Sincroniza roles<br/>- Logging completo]
+    end
+    
+    subgraph "💾 GESTIÓN DE DATOS"
+        SUBSCRIBERS[class-wpmps-subscribers.php<br/>👥 Gestión Suscriptores<br/>- get_subscribers_fast (OPTIMIZADO)<br/>- refresh_subscriber<br/>- Caché persistente + backup<br/>- cleanup_old_token_data<br/>⚠️ PROBLEMA: Múltiples llamadas MP]
+        
+        PAYMENTS[class-wpmps-payments.php<br/>💳 Gestión Pagos<br/>- get_payments_with_mapping<br/>- Convierte preapprovals a pagos<br/>- Mapeo con suscriptores<br/>⚠️ PROBLEMA: API suscripciones inestable]
+        
+        SYNC[class-wpmps-sync.php<br/>🔄 Sincronización<br/>- get_plans (LIMITADO)<br/>- search_preapproval_plans<br/>- Caché de planes<br/>⚠️ PROBLEMA: Endpoint planes no funciona]
+    end
+    
+    subgraph "🎛️ PANEL ADMIN"
+        ADMIN[class-wpmps-admin.php<br/>🏢 Panel Administración<br/>- Menús y submenús<br/>- Handlers de acciones<br/>- Renderizado de vistas]
+        
+        VIEWS[📊 Vistas Admin<br/>- settings.php<br/>- subscribers.php<br/>- payments.php<br/>- plans.php<br/>- logs.php]
+        
+        LOGS[class-wpmps-logs.php<br/>📝 Sistema de Logs<br/>- Ring buffer<br/>- Filtros por canal<br/>- Exportación NDJSON]
+    end
+    
+    subgraph "🎨 FRONTEND"
+        SHORTCODES[shortcodes.php<br/>🔗 Shortcode [mp_subscribe]<br/>- Botón de suscripción<br/>- Redirección a MP<br/>- Validación de login]
+        
+        BLOCKS[📦 Gutenberg Block<br/>subscribe-button/<br/>- Bloque para editor<br/>- Configuración visual]
+    end
+    
+    subgraph "⏰ AUTOMATIZACIÓN"
+        CRON[class-wpmps-cron.php<br/>⏰ Tareas Programadas<br/>- check_subscriptions (cada 15min)<br/>- Sincronización roles<br/>- Rate limiting (10min entre checks)<br/>- Mantenimiento caché<br/>✅ FUNCIONA BIEN]
+        
+        LOGGER[class-wpmps-logger.php<br/>📊 Sistema de Logging<br/>- Ring buffer (500 eventos)<br/>- Canales: AUTH, WEBHOOK, ADMIN, etc<br/>- Debug automático<br/>- Exportación NDJSON<br/>✅ FUNCIONA BIEN]
+    end
+    
+    subgraph "🌐 MERCADOPAGO API"
+        MPAPI[🏦 MercadoPago API<br/>- /preapproval_plan ❌ NO FUNCIONA<br/>- /preapproval/{id} ✅ FUNCIONA<br/>- /preapproval/search ✅ FUNCIONA<br/>- /v1/payments/search ✅ FUNCIONA<br/>⚠️ PROBLEMA: Inconsistencias API]
+        
+        MPCHECKOUT[💻 MP Checkout Web<br/>subscriptions/checkout<br/>- Interfaz de usuario ✅<br/>- Procesamiento de pago ✅<br/>- Webhooks automáticos ✅<br/>- PostMessage ⚠️ INTERMITENTE]
+    end
+    
+    subgraph "💾 WORDPRESS DATA"
+        WPUSERS[👤 WP Users<br/>- user_email<br/>- user_roles<br/>- user_meta]
+        
+        USERMETA[📋 User Meta<br/>- _suscripcion_activa<br/>- _mp_preapproval_id<br/>- _mp_plan_id<br/>- _mp_updated_at]
+        
+        OPTIONS[⚙️ WP Options<br/>- wpmps_access_token<br/>- wpmps_plans_cache<br/>- wpmps_log_ring]
+    end
+    
+    %% FLUJO PRINCIPAL DE SUSCRIPCIÓN
+    MAIN --> SHORTCODES
+    SHORTCODES --> MPCHECKOUT
+    MPCHECKOUT --> WEBHOOK
+    WEBHOOK --> MPCLIENT
+    MPCLIENT --> MPAPI
+    WEBHOOK --> USERMETA
+    WEBHOOK --> WPUSERS
+    
+    %% FLUJO DE ADMINISTRACIÓN
+    ADMIN --> VIEWS
+    ADMIN --> SUBSCRIBERS
+    ADMIN --> PAYMENTS
+    ADMIN --> SYNC
+    SUBSCRIBERS --> MPCLIENT
+    PAYMENTS --> MPCLIENT
+    SYNC --> MPCLIENT
+    
+    %% FLUJO DE DATOS
+    SUBSCRIBERS --> WPUSERS
+    SUBSCRIBERS --> USERMETA
+    PAYMENTS --> MPAPI
+    SYNC --> OPTIONS
+    
+    %% LOGGING
+    WEBHOOK --> LOGGER
+    MPCLIENT --> LOGGER
+    ADMIN --> LOGGER
+    LOGGER --> OPTIONS
+    
+    %% CACHÉ Y PERFORMANCE
+    CRON --> SUBSCRIBERS
+    CRON --> PAYMENTS
+    CRON --> OPTIONS
+    
+    %% CONFIGURACIÓN
+    SETTINGS --> OPTIONS
+    HELPERS --> OPTIONS
+    
+    subgraph "🚨 PROBLEMAS IDENTIFICADOS"
+        PROB1[❌ API Planes MP<br/>search_preapproval_plans<br/>NO FUNCIONA<br/>Endpoint inestable]
+        
+        PROB2[⚠️ Múltiples llamadas MP<br/>get_subscribers_fast<br/>Puede hacer 50+ requests<br/>Necesita optimización]
+        
+        PROB3[⚠️ Caché inconsistente<br/>Datos desactualizados<br/>Entre transients y user_meta<br/>Limpieza manual necesaria]
+        
+        PROB4[⚠️ PostMessage intermitente<br/>Comunicación modal-parent<br/>Fallback a traditional flow<br/>Funciona pero no siempre]
+    end
+    
+    %% CONEXIONES DE PROBLEMAS
+    SYNC --> PROB1
+    SUBSCRIBERS --> PROB2
+    SUBSCRIBERS --> PROB3
+    MPCHECKOUT --> PROB4
+    
+    %% ESTILOS
+    classDef coreClass fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef apiClass fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef dataClass fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
+    classDef adminClass fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef frontendClass fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+    classDef automationClass fill:#f1f8e9,stroke:#33691e,stroke-width:2px
+    classDef mpClass fill:#ffebee,stroke:#b71c1c,stroke-width:2px
+    classDef wpClass fill:#e3f2fd,stroke:#0d47a1,stroke-width:2px
+    classDef problemClass fill:#ffcdd2,stroke:#d32f2f,stroke-width:3px
+    
+    class MAIN,HELPERS,SETTINGS coreClass
+    class MPCLIENT,ROUTES,WEBHOOK apiClass
+    class SUBSCRIBERS,PAYMENTS,SYNC dataClass
+    class ADMIN,VIEWS,LOGS adminClass
+    class SHORTCODES,BLOCKS frontendClass
+    class CRON,LOGGER automationClass
+    class MPAPI,MPCHECKOUT mpClass
+    class WPUSERS,USERMETA,OPTIONS wpClass
+    class PROB1,PROB2,PROB3,PROB4 problemClass
+%
+% ========================================
+%% ANÁLISIS DE ARQUITECTURA - RESUMEN
+%% ========================================
+%% 
+%% COMPONENTES QUE FUNCIONAN BIEN:
+%% ✅ Sistema de logging (WPMPS_Logger)
+%% ✅ Cliente MP básico (get_preapproval)
+%% ✅ Webhooks de notificación
+%% ✅ Cron de sincronización
+%% ✅ Panel de administración
+%% ✅ Shortcodes y botones
+%% 
+%% PROBLEMAS PRINCIPALES:
+%% ❌ API de planes MP (search_preapproval_plans) - ENDPOINT ROTO
+%% ⚠️ Múltiples llamadas MP en get_subscribers - INEFICIENTE
+%% ⚠️ Sistema de caché inconsistente - DATOS DESACTUALIZADOS
+%% ⚠️ PostMessage intermitente - FUNCIONA PERO NO SIEMPRE
+%% 
+%% FLUJO PRINCIPAL FUNCIONAL:
+%% 1. Usuario hace clic en [mp_subscribe] → Redirección a MP
+%% 2. Usuario completa pago en MP → Webhook notifica
+%% 3. Webhook actualiza user_meta → Sincroniza roles
+%% 4. Cron mantiene sincronización → Sistema funciona
+%% 
+%% RECOMENDACIONES:
+%% 1. Deshabilitar temporalmente la página de Planes (API rota)
+%% 2. Optimizar get_subscribers_fast (limitar llamadas MP)
+%% 3. Unificar sistema de caché (solo transients o solo user_meta)
+%% 4. Mantener fallback tradicional para PostMessage
+%%
+%% ARQUITECTURA GENERAL: SÓLIDA Y FUNCIONAL
+%% El plugin tiene una base sólida con separación clara de responsabilidades.
+%% Los problemas son específicos y no afectan la funcionalidad core.

@@ -7,7 +7,7 @@ $items = class_exists('WPMPS_Logger') ? WPMPS_Logger::filtered(['channel'=>$chan
 
 <form method="get" style="margin-top:10px;">
   <input type="hidden" name="page" value="wpmps-logs" />
-  <?php $channels = ['AUTH','BUTTON','CHECKOUT','WEBHOOK','SUBSCRIPTION','ADMIN','ERROR']; ?>
+  <?php $channels = ['AUTH','BUTTON','CHECKOUT','WEBHOOK','SUBSCRIPTION','CRON','ADMIN','ERROR']; ?>
   <label><?php _e('Canal','wp-mp-subscriptions'); ?>
     <select name="channel">
       <option value="">— <?php _e('Todos','wp-mp-subscriptions'); ?> —</option>

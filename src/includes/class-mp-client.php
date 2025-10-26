@@ -135,4 +135,60 @@ class WPMPS_MP_Client {
     
     return $normalized;
   }
+
+  // ----- Payments API
+  public function get_payment($id){
+    if (function_exists('wpmps_log_admin')){
+      wpmps_log_admin('mp_get_payment_request', [
+        'payment_id' => sanitize_text_field($id)
+      ]);
+    }
+    
+    $res = wp_remote_get($this->api.'/v1/payments/'.rawurlencode($id), [
+      'headers' => $this->headers(),
+      'timeout' => 20
+    ]);
+    
+    $out = $this->normalize_response($res);
+    
+    if (function_exists('wpmps_log_admin')){
+      wpmps_log_admin('mp_get_payment_response', [
+        'payment_id' => sanitize_text_field($id),
+        'http_code' => $out['http'] ?? 0
+      ]);
+    }
+    
+    return $out;
+  }
+
+  public function search_payments($params = []){
+    $query = http_build_query($params);
+    $url = $this->api.'/v1/payments/search'.($query?('?'.$query):'');
+    
+    // Log the request
+    if (function_exists('wpmps_log_admin')){
+      wpmps_log_admin('mp_search_payments_request', [
+        'url' => $url,
+        'params' => $params
+      ]);
+    }
+    
+    $res = wp_remote_get($url, [
+      'headers' => $this->headers(),
+      'timeout' => 20
+    ]);
+    
+    $normalized = $this->normalize_response($res);
+    
+    // Log the response
+    if (function_exists('wpmps_log_admin')){
+      wpmps_log_admin('mp_search_payments_response', [
+        'http_code' => $normalized['http'] ?? 0,
+        'has_body' => !empty($normalized['body']),
+        'results_count' => isset($normalized['body']['results']) ? count($normalized['body']['results']) : 0
+      ]);
+    }
+    
+    return $normalized;
+  }
 }

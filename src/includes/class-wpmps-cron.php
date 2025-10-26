@@ -33,10 +33,10 @@ class WPMPS_Cron {
     // Schedule to run every 15 minutes
     wp_schedule_event(time(), 'wpmps_15min', self::HOOK_NAME);
     
-    wpmps_log_admin('cron_scheduled', [
+    wpmps_log('CRON', wpmps_collect_context('cron_scheduled', [
       'hook' => self::HOOK_NAME,
       'next_run' => wp_next_scheduled(self::HOOK_NAME)
-    ]);
+    ]));
     
     return true;
   }
@@ -44,59 +44,62 @@ class WPMPS_Cron {
   public static function unschedule() {
     wp_clear_scheduled_hook(self::HOOK_NAME);
     
-    wpmps_log_admin('cron_unscheduled', [
+    wpmps_log('CRON', wpmps_collect_context('cron_unscheduled', [
       'hook' => self::HOOK_NAME
-    ]);
+    ]));
   }
   
   public static function check_subscriptions() {
     $start_time = microtime(true);
     
-    wpmps_log_admin('cron_started', [
+    wpmps_log('CRON', wpmps_collect_context('cron_started', [
       'timestamp' => current_time('mysql'),
       'memory_usage' => memory_get_usage(true)
-    ]);
+    ]));
     
     // Update last run timestamp
     update_option(self::OPTION_LAST_RUN, current_time('mysql'));
     
-    // Get access token
-    $token = function_exists('wpmps_get_access_token') ? wpmps_get_access_token() : '';
-    if (empty($token)) {
-      wpmps_log_error('cron', 'no_token', 'Missing access token for cron job');
+    // Get configured subscription role
+    $subscription_role = get_option('wpmps_role_on_authorized', '');
+    if ($subscription_role === 1 || $subscription_role === '1') {
+      $subscription_role = 'suscriptor_premium';
+    }
+    $subscription_role = trim((string) $subscription_role);
+    
+    // Debug role configuration
+    wpmps_log('CRON', wpmps_collect_context('cron_role_config', [
+      'raw_option' => get_option('wpmps_role_on_authorized', 'NOT_SET'),
+      'processed_role' => $subscription_role,
+      'role_exists' => !empty($subscription_role) ? (get_role($subscription_role) ? 'yes' : 'no') : 'empty',
+    ]));
+    
+    // Use the same method as the subscribers page
+    $subscribers = WPMPS_Subscribers::get_subscribers();
+    
+    if (empty($subscribers)) {
+      wpmps_log('CRON', wpmps_collect_context('cron_no_subscribers', [
+        'message' => 'No subscribers found'
+      ]));
       return;
     }
     
-    // Get all users with subscription metadata
-    $users = get_users([
-      'meta_query' => [
-        [
-          'key' => '_mp_preapproval_id',
-          'compare' => 'EXISTS'
-        ]
-      ],
-      'fields' => ['ID', 'user_email']
-    ]);
-    
-    if (empty($users)) {
-      wpmps_log_admin('cron_no_users', [
-        'message' => 'No users with subscription metadata found'
-      ]);
-      return;
-    }
-    
-    $client = new WPMPS_MP_Client($token);
     $processed = 0;
-    $updated = 0;
+    $synced = 0;
+    $role_changes = 0;
     $errors = 0;
     
-    foreach ($users as $user) {
-      $user_id = $user->ID;
-      $preapproval_id = get_user_meta($user_id, '_mp_preapproval_id', true);
-      
-      if (empty($preapproval_id)) {
+    foreach ($subscribers as $sub) {
+      // Skip if no user_id or if this is from a different token
+      if (empty($sub['user_id']) || $sub['sync_status'] === 'different_token') {
         continue;
       }
+      
+      $user_id = $sub['user_id'];
+      $user_email = $sub['email'];
+      $mp_status = $sub['status'];
+      $sync_status = $sub['sync_status'];
+      $user_roles = $sub['user_roles'];
       
       $processed++;
       
@@ -111,72 +114,113 @@ class WPMPS_Cron {
         }
       }
       
-      // Fetch current status from MP
-      $response = $client->get_preapproval($preapproval_id);
-      
-      if ($response['http'] !== 200) {
-        $errors++;
-        wpmps_log_error('cron', 'fetch_failed', 'Failed to fetch preapproval in cron', [
-          'user_id' => $user_id,
-          'preapproval_id' => $preapproval_id,
-          'http_code' => $response['http'] ?? 0
-        ]);
-        continue;
-      }
-      
-      $data = $response['body'];
-      $current_status = sanitize_text_field($data['status'] ?? '');
-      $stored_status = get_user_meta($user_id, '_mp_sub_status', true);
-      
       // Update last checked timestamp
       update_user_meta($user_id, '_mp_last_checked', current_time('mysql'));
       
-      // Check if status changed
-      if ($current_status !== $stored_status) {
-        $updated++;
+      // Debug subscriber data
+      wpmps_log('CRON', wpmps_collect_context('cron_subscriber_data', [
+        'user_id' => $user_id,
+        'user_email' => $user_email,
+        'mp_status' => $mp_status,
+        'sync_status' => $sync_status,
+        'user_roles' => $user_roles,
+        'subscription_role' => $subscription_role,
+      ]));
+      
+      // Skip if no subscription role configured
+      if (empty($subscription_role)) {
+        continue;
+      }
+      
+      $wp_user = new WP_User($user_id);
+      $current_roles = $wp_user->roles;
+      $has_subscription_role = in_array($subscription_role, $current_roles);
+      $should_be_active = ($mp_status === 'authorized');
+      
+      // Determine if role sync is needed
+      $needs_role_sync = false;
+      $sync_reason = '';
+      
+      if ($sync_status === 'needs_role_change') {
+        // MP inactive but user still has subscriber role - remove subscription role
+        $needs_role_sync = true;
+        $sync_reason = 'remove_role_mp_inactive';
+      } elseif ($should_be_active && !$has_subscription_role) {
+        // MP active but user doesn't have subscription role - add it
+        $needs_role_sync = true;
+        $sync_reason = 'add_role_mp_active';
+      } elseif (!$should_be_active && $has_subscription_role) {
+        // MP inactive but user has subscription role - remove it
+        $needs_role_sync = true;
+        $sync_reason = 'remove_role_mp_inactive';
+      }
+      
+      if ($needs_role_sync) {
+        $synced++;
+        $roles_before = $current_roles;
         
-        // Update stored status
-        update_user_meta($user_id, '_mp_sub_status', $current_status);
-        
-        // Update subscription active flag
-        $active = ($current_status === 'authorized') ? 'yes' : 'no';
-        update_user_meta($user_id, '_suscripcion_activa', $active);
-        
-        // Update other metadata
-        if (!empty($data['preapproval_plan_id'])) {
-          update_user_meta($user_id, '_mp_plan_id', sanitize_text_field($data['preapproval_plan_id']));
+        // Use the same function that handles role sync everywhere else
+        if (function_exists('wpmps_sync_subscription_role')) {
+          $role_sync_result = wpmps_sync_subscription_role($user_id, $mp_status);
+          
+          if ($role_sync_result) {
+            $role_changes++;
+            
+            // Get roles after sync
+            $wp_user_refreshed = new WP_User($user_id);
+            $roles_after = $wp_user_refreshed->roles;
+            
+            wpmps_log_subscription('cron_role_synced', [
+              'user_id' => $user_id,
+              'user_email' => $user_email,
+              'mp_status' => $mp_status,
+              'sync_reason' => $sync_reason,
+              'roles_before' => $roles_before,
+              'roles_after' => $roles_after,
+              'subscription_role' => $subscription_role,
+              'should_be_active' => $should_be_active ? 'yes' : 'no',
+            ]);
+          }
+        } else {
+          wpmps_log_error('cron', 'sync_function_missing', 'wpmps_sync_subscription_role function not available', [
+            'user_id' => $user_id
+          ]);
         }
+        
+        // Update user metadata
+        $active_flag = $should_be_active ? 'yes' : 'no';
+        update_user_meta($user_id, '_suscripcion_activa', $active_flag);
         update_user_meta($user_id, '_mp_updated_at', current_time('mysql'));
         
-        // Sync user role
-        if (function_exists('wpmps_sync_subscription_role')) {
-          wpmps_sync_subscription_role($user_id, $current_status);
-        }
-        
-        wpmps_log_subscription('cron_status_changed', [
+        wpmps_log_subscription('cron_sync_completed', [
           'user_id' => $user_id,
-          'user_email' => $user->user_email,
-          'preapproval_id' => $preapproval_id,
-          'old_status' => $stored_status,
-          'new_status' => $current_status,
-          'active' => $active
+          'user_email' => $user_email,
+          'sync_reason' => $sync_reason,
+          'mp_status' => $mp_status,
+          'should_be_active' => $should_be_active ? 'yes' : 'no',
+          'subscription_role' => $subscription_role,
+          'roles_before' => $roles_before,
+          'roles_after' => $roles_after,
+          'mail_sent' => is_null($mail_sent) ? '' : ($mail_sent ? 'yes' : 'no'),
         ]);
       }
       
-      // Rate limiting: small delay between requests
-      usleep(100000); // 0.1 seconds
+      // Rate limiting: small delay between users
+      usleep(50000); // 0.05 seconds
     }
     
     $end_time = microtime(true);
     $duration = round($end_time - $start_time, 2);
     
-    wpmps_log_admin('cron_completed', [
+    wpmps_log('CRON', wpmps_collect_context('cron_completed', [
       'duration_seconds' => $duration,
-      'users_processed' => $processed,
-      'users_updated' => $updated,
+      'subscribers_processed' => $processed,
+      'users_synced' => $synced,
+      'role_changes' => $role_changes,
       'errors' => $errors,
-      'memory_peak' => memory_get_peak_usage(true)
-    ]);
+      'memory_peak' => memory_get_peak_usage(true),
+      'subscription_role' => $subscription_role
+    ]));
   }
   
   public static function admin_actions() {
@@ -216,6 +260,8 @@ class WPMPS_Cron {
         }
       }
     }
+    
+
   }
   
   public static function get_status() {
@@ -226,11 +272,13 @@ class WPMPS_Cron {
     return [
       'enabled' => $enabled,
       'scheduled' => (bool) $next_run,
-      'next_run' => $next_run ? date('Y-m-d H:i:s', $next_run) : '',
+      'next_run' => $next_run ? get_date_from_gmt(date('Y-m-d H:i:s', $next_run), 'Y-m-d H:i:s') : '',
       'last_run' => $last_run,
       'hook_name' => self::HOOK_NAME
     ];
   }
+  
+
 }
 
 // Add custom cron interval
