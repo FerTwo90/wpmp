@@ -88,36 +88,6 @@ class WPMPS_Admin {
     echo '</div>';
   }
 
-  public static function render_subscribers(){
-    if (!current_user_can('manage_options')) return;
-    
-    // Log start of render
-    if (function_exists('wpmps_log_admin')){
-      wpmps_log_admin('render_subscribers_start', []);
-    }
-    
-    $subs = WPMPS_Subscribers::get_subscribers();
-    
-    // Log what we got
-    if (function_exists('wpmps_log_admin')){
-      wpmps_log_admin('render_subscribers_data', [
-        'count' => count($subs),
-        'first_email' => !empty($subs) ? ($subs[0]['email'] ?? 'N/A') : 'No data',
-        'sample_data' => !empty($subs) ? array_slice($subs, 0, 1) : []
-      ]);
-    }
-    
-    // Build quick map of plan_id -> name via cached plans
-    $plans = WPMPS_Sync::get_plans();
-    $plans_map = [];
-    foreach ($plans as $p){ if (!empty($p['id'])) $plans_map[$p['id']] = ($p['name'] ?? ''); }
-    echo '<div class="wrap">';
-    echo '<h1>'.esc_html__('Suscriptores', 'wp-mp-subscriptions').'</h1>';
-    self::tabs('wpmps-subscribers');
-    self::view('subscribers', ['subs'=>$subs, 'plans_map'=>$plans_map]);
-    echo '</div>';
-  }
-
   public static function render_mail(){
     if (!current_user_can('manage_options')) return;
     $opts = [
@@ -188,38 +158,6 @@ class WPMPS_Admin {
 
   }
 
-  public static function render_payments(){
-    if (!current_user_can('manage_options')) return;
-    
-    // Log start of render
-    if (function_exists('wpmps_log_admin')){
-      wpmps_log_admin('render_payments_start', []);
-    }
-    
-    // Get filter parameters
-    $filters = array_filter([
-      'status' => isset($_GET['filter_status']) ? sanitize_text_field($_GET['filter_status']) : '',
-      'match_type' => isset($_GET['filter_match']) ? sanitize_text_field($_GET['filter_match']) : '',
-      'email' => isset($_GET['filter_email']) ? sanitize_text_field($_GET['filter_email']) : '',
-      'amount_min' => isset($_GET['filter_amount_min']) ? sanitize_text_field($_GET['filter_amount_min']) : '',
-      'amount_max' => isset($_GET['filter_amount_max']) ? sanitize_text_field($_GET['filter_amount_max']) : '',
-      'plan_id' => isset($_GET['filter_plan_id']) ? sanitize_text_field($_GET['filter_plan_id']) : '',
-      'plan_name' => isset($_GET['filter_plan_name']) ? sanitize_text_field($_GET['filter_plan_name']) : ''
-    ]);
-    
-    $payments_data = WPMPS_Payments::get_filtered_payments($filters);
-    $stats = WPMPS_Payments::get_payments_stats($payments_data);
-    
-    echo '<div class="wrap">';
-    echo '<h1>'.esc_html__('Pagos de MercadoPago', 'wp-mp-subscriptions').'</h1>';
-    self::tabs('wpmps-payments');
-    self::view('payments', [
-      'payments_data' => $payments_data,
-      'stats' => $stats,
-      'filters' => $filters
-    ]);
-    echo '</div>';
-  }
 
   public static function render_logs(){
     if (!current_user_can('manage_options')) return;
@@ -459,17 +397,4 @@ class WPMPS_Admin {
     exit;
   }
 
-  public static function clear_payments_cache(){
-    if (!current_user_can('manage_options')) wp_die('');
-    check_admin_referer('wpmps_clear_payments_cache');
-    
-    if (function_exists('wpmps_log_admin')){
-      wpmps_log_admin('clear_payments_cache_request', []);
-    }
-    
-    WPMPS_Payments::clear_cache();
-    
-    wp_redirect(add_query_arg('payments_cache_cleared', 1, admin_url('admin.php?page=wpmps-payments')));
-    exit;
-  }
 }
