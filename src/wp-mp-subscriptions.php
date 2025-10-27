@@ -33,6 +33,7 @@ require_once WPMPS_DIR.'includes/routes.php';
 require_once WPMPS_DIR.'includes/class-wpmps-sync.php';
 require_once WPMPS_DIR.'includes/class-wpmps-subscribers.php';
 require_once WPMPS_DIR.'includes/class-wpmps-payments.php';
+require_once WPMPS_DIR.'includes/class-wpmps-pagos-y-suscripciones.php';
 require_once WPMPS_DIR.'includes/class-wpmps-cron.php';
 require_once WPMPS_DIR.'admin/class-wpmps-admin.php';
 require_once WPMPS_DIR.'admin/class-wpmps-logs.php';

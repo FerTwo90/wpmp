@@ -177,12 +177,12 @@ class WPMPS_Admin {
     $subscriptions_data = WPMPS_Payments_Subscriptions::get_subscriptions($filters);
     
     echo '<div class="wrap">';
-    echo '<h1>'.esc_html__('Pagos de MercadoPago', 'wp-mp-subscriptions').'</h1>';
-    self::tabs('wpmps-payments');
-    self::view('payments', [
-      'payments_data' => $payments_data,
-      'subscriptions_data' => $subscriptions_data,
-      'filters' => $filters
+    echo '<h1>'.esc_html__('Pagos y Suscripciones', 'wp-mp-subscriptions').'</h1>';
+    self::tabs('wpmps-payments-subscriptions');
+    self::view('payments-subscriptions', [
+      'payments_data'       => $payments_data,
+      'subscriptions_data'  => $subscriptions_data,
+      'filters'             => $filters
     ]);
     echo '</div>';
 

@@ -2,17 +2,29 @@
 if (!defined('ABSPATH')) exit;
 
 class WPMPS_Payments_Subscriptions {
-  
-    function __construct() {
-        // Constructor code here
-    }
 
-    function get_payments($filters) {
-        // Code to get payments based on filters
-    }
+  /**
+   * Obtiene pagos reutilizando la lógica existente del módulo de pagos.
+   */
+  public static function get_payments($filters = []) {
 
-    function get_subscriptions($filters) {
-        // Code to get subscriptions based on filters
-    }
-    
+    return [
+      'success'  => false,
+      'message'  => __('La funcion está en desarrollo', 'wp-mp-subscriptions'),
+      'payments' => []
+    ];
+  }
+
+  /**
+   * Obtiene suscripciones básicas desde el módulo de suscriptores.
+   */
+  public static function get_subscriptions($filters = []) {
+
+
+    return [
+      'success'       => false,
+      'subscriptions' => [],
+      'message'       => __('La funcion está en desarrollo', 'wp-mp-subscriptions')
+    ];
+  }
 }
