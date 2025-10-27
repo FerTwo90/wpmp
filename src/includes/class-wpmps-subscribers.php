@@ -6,8 +6,9 @@ class WPMPS_Subscribers {
   /**
    * Obtiene las últimas suscripciones de Mercado Pago (máx 100).
    */
-  public static function get_latest_subscriptions($limit = 25){
+  public static function get_latest_subscriptions($limit = 25, $offset = 0){
     $limit = max(1, min(100, intval($limit)));
+    $offset = max(0, intval($offset));
     $token = function_exists('wpmps_get_access_token') ? wpmps_get_access_token() : '';
 
     if (empty($token)) {
@@ -33,6 +34,7 @@ class WPMPS_Subscribers {
 
     $params = [
       'limit'  => $limit,
+      'offset' => $offset,
     ];
 
     $response = $client->search_preapprovals($params);

@@ -20,6 +20,8 @@ class WPMPS_Admin {
     add_action('admin_post_wpmps_force_sync_payments', [__CLASS__, 'handle_force_sync_payments']);
     add_action('admin_post_wpmps_clear_sync_cache', [__CLASS__, 'handle_clear_sync_cache']);
     add_action('admin_post_wpmps_reset_payments_table', [__CLASS__, 'handle_reset_payments_table']);
+    add_action('wp_ajax_wpmps_search_users', [__CLASS__, 'handle_search_users']);
+    add_action('wp_ajax_wpmps_associate_user', [__CLASS__, 'handle_associate_user']);
     add_filter('default_content', [__CLASS__, 'maybe_inject_shortcode'], 10, 2);
   }
 
@@ -136,12 +138,27 @@ class WPMPS_Admin {
       wpmps_log_admin('render_pagos_y_suscripciones_start', []);
     }
 
-    $seed_result = WPMPS_Payments_Subscriptions::bootstrap_subscriptions_if_empty(25);
+    // PASO 1: Tengo todas las suscripciones? (sino buscar las que falten)
+    $seed_result = WPMPS_Payments_Subscriptions::bootstrap_subscriptions_if_empty(100);
+    $smart_sync_result = WPMPS_Payments_Subscriptions::smart_sync_subscriptions(100);
     
-    // SIEMPRE sincronizar pagos cuando se carga la pestaña
-    $payments_seed_result = WPMPS_Payments_Subscriptions::force_sync_all_payments(50);
+    // PASO 2 y 3: Completar datos faltantes de pagos (reutilizando entre filas)
+    $payments_seed_result = WPMPS_Payments_Subscriptions::complete_payment_data();
+    
+    // PASO 4: Mapear usuarios de WordPress
+    $user_mapping_result = WPMPS_Payments_Subscriptions::map_users_to_subscriptions();
 
-    $filters = [];
+    $filters = array_filter([
+      'status' => isset($_GET['filter_status']) ? sanitize_text_field($_GET['filter_status']) : '',
+      'plan_id' => isset($_GET['filter_plan_id']) ? sanitize_text_field($_GET['filter_plan_id']) : '',
+      'preapproval_id' => isset($_GET['filter_preapproval_id']) ? sanitize_text_field($_GET['filter_preapproval_id']) : '',
+      'payer_identification' => isset($_GET['filter_document']) ? sanitize_text_field($_GET['filter_document']) : '',
+      'payment_id' => isset($_GET['filter_payment_id']) ? sanitize_text_field($_GET['filter_payment_id']) : '',
+      'orderby' => isset($_GET['orderby']) ? sanitize_text_field($_GET['orderby']) : 'created_at',
+      'order' => isset($_GET['order']) && in_array(strtoupper($_GET['order']), ['ASC', 'DESC']) ? strtoupper($_GET['order']) : 'DESC',
+      'limit' => isset($_GET['filter_limit']) ? max(10, min(100, intval($_GET['filter_limit']))) : 50,
+      'offset' => isset($_GET['paged']) ? max(0, (intval($_GET['paged']) - 1) * 50) : 0
+    ]);
     
     $subscriptions_data = WPMPS_Payments_Subscriptions::get_subscriptions($filters);
     
@@ -152,6 +169,8 @@ class WPMPS_Admin {
       'subscriptions_data'  => $subscriptions_data,
       'filters'             => $filters,
       'seed_result'         => $seed_result,
+      'smart_sync_result'   => $smart_sync_result,
+      'user_mapping_result' => $user_mapping_result,
       'payments_seed_result'=> $payments_seed_result
     ]);
     echo '</div>';
@@ -470,6 +489,73 @@ class WPMPS_Admin {
     
     wp_redirect(add_query_arg($redirect_args, admin_url('admin.php?page=wpmps-payments-subscriptions')));
     exit;
+  }
+
+  /**
+   * Handler AJAX para buscar usuarios
+   */
+  public static function handle_search_users() {
+    if (!current_user_can('manage_options')) wp_die('');
+    check_ajax_referer('wpmps_search_users', 'nonce');
+
+    $query = sanitize_text_field($_POST['query'] ?? '');
+    $exclude = sanitize_text_field($_POST['exclude'] ?? '');
+    $exclude_ids = !empty($exclude) ? array_map('intval', explode(',', $exclude)) : [];
+
+    if (strlen($query) < 2) {
+      wp_send_json([]);
+    }
+
+    $args = [
+      'search' => '*' . $query . '*',
+      'search_columns' => ['user_login', 'user_email', 'display_name'],
+      'number' => 20,
+      'exclude' => $exclude_ids
+    ];
+
+    $users = get_users($args);
+    $results = [];
+
+    foreach ($users as $user) {
+      $results[] = [
+        'ID' => $user->ID,
+        'user_email' => $user->user_email,
+        'display_name' => $user->display_name,
+        'roles' => $user->roles
+      ];
+    }
+
+    wp_send_json($results);
+  }
+
+  /**
+   * Handler AJAX para asociar usuario
+   */
+  public static function handle_associate_user() {
+    if (!current_user_can('manage_options')) wp_die('');
+    check_ajax_referer('wpmps_associate_user', 'nonce');
+
+    $sub_id = intval($_POST['sub_id'] ?? 0);
+    $user_id = intval($_POST['user_id'] ?? 0);
+
+    if (!$sub_id || !$user_id) {
+      wp_send_json_error(__('Datos inválidos.', 'wp-mp-subscriptions'));
+    }
+
+    global $wpdb;
+    $table = WPMPS_Payments_Subscriptions::table_name();
+    
+    $result = $wpdb->update(
+      $table,
+      ['user_id' => $user_id],
+      ['id' => $sub_id]
+    );
+
+    if ($result !== false) {
+      wp_send_json_success(__('Usuario asociado correctamente.', 'wp-mp-subscriptions'));
+    } else {
+      wp_send_json_error(__('Error al asociar usuario.', 'wp-mp-subscriptions'));
+    }
   }
 
 }
