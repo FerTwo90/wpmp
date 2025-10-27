@@ -22,6 +22,8 @@ class WPMPS_Admin {
     add_action('admin_post_wpmps_reset_payments_table', [__CLASS__, 'handle_reset_payments_table']);
     add_action('wp_ajax_wpmps_search_users', [__CLASS__, 'handle_search_users']);
     add_action('wp_ajax_wpmps_associate_user', [__CLASS__, 'handle_associate_user']);
+    add_action('wp_ajax_wpmps_register_manual_payment', [__CLASS__, 'handle_manual_payment']);
+    add_action('wp_ajax_nopriv_wpmps_register_manual_payment', [__CLASS__, 'handle_manual_payment']);
     add_filter('default_content', [__CLASS__, 'maybe_inject_shortcode'], 10, 2);
   }
 
@@ -555,6 +557,122 @@ class WPMPS_Admin {
       wp_send_json_success(__('Usuario asociado correctamente.', 'wp-mp-subscriptions'));
     } else {
       wp_send_json_error(__('Error al asociar usuario.', 'wp-mp-subscriptions'));
+    }
+  }
+
+  /**
+   * Handler AJAX para registrar pago manual
+   */
+  public static function handle_manual_payment() {
+    if (!is_user_logged_in()) {
+      wp_send_json_error(__('Debe estar logueado para registrar un pago.', 'wp-mp-subscriptions'));
+    }
+
+    check_ajax_referer('wpmps_manual_payment', 'nonce');
+
+    $cuit_cuil = sanitize_text_field($_POST['cuit_cuil'] ?? '');
+    $payment_id = sanitize_text_field($_POST['payment_id'] ?? '');
+    $plan_id = sanitize_text_field($_POST['plan_id'] ?? '');
+
+    if (empty($cuit_cuil) || empty($payment_id) || empty($plan_id)) {
+      wp_send_json_error(__('CUIT/CUIL, número de operación y plan son requeridos.', 'wp-mp-subscriptions'));
+    }
+
+    // Verificar que el payment_id sea numérico
+    if (!is_numeric($payment_id)) {
+      wp_send_json_error(__('El número de operación debe ser numérico.', 'wp-mp-subscriptions'));
+    }
+
+    $current_user = wp_get_current_user();
+    
+    // Verificar pagos con la API de Mercado Pago
+    $token = function_exists('wpmps_get_access_token') ? wpmps_get_access_token() : '';
+    if (empty($token)) {
+      wp_send_json_error(__('Error de configuración: No se encontró token de acceso.', 'wp-mp-subscriptions'));
+    }
+
+    try {
+      $client = new WPMPS_MP_Client($token);
+      $response = $client->get_payment($payment_id);
+      
+      $http_code = $response['http'] ?? 0;
+      $payment_data = $response['body'] ?? [];
+
+      if ($http_code !== 200 || empty($payment_data)) {
+        wp_send_json_error(__('No se encontró el pago con ese número de operación.', 'wp-mp-subscriptions'));
+      }
+
+      // Obtener email del pagador (solo para información, no para validación)
+      $payer_email = $payment_data['payer']['email'] ?? '';
+
+      // Verificar CUIT/CUIL
+      $payer_identification = $payment_data['payer']['identification']['number'] ?? '';
+      if ($payer_identification !== $cuit_cuil) {
+        wp_send_json_error(__('El pago no corresponde al CUIT/CUIL ingresado.', 'wp-mp-subscriptions'));
+      }
+
+      // El pago existe y es válido (no importa el estado)
+      $payer_id = sanitize_text_field($payment_data['payer']['id'] ?? '');
+      
+      if (empty($payer_id)) {
+        wp_send_json_error(__('No se pudo obtener el payer_id del pago.', 'wp-mp-subscriptions'));
+      }
+
+      // Buscar suscripción activa para este payer_id
+      global $wpdb;
+      $table = WPMPS_Payments_Subscriptions::table_name();
+      
+      $active_subscription = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM {$table} WHERE payer_id = %s AND status IN ('authorized', 'active') LIMIT 1",
+        $payer_id
+      ), ARRAY_A);
+
+      if (!$active_subscription) {
+        wp_send_json_error(__('No se encontró una suscripción activa para este payer_id. Debe tener una suscripción activa antes de registrar pagos.', 'wp-mp-subscriptions'));
+      }
+
+      // Verificar que el plan coincida
+      if ($active_subscription['plan_id'] !== $plan_id) {
+        wp_send_json_error(sprintf(__('El pago corresponde al plan %s, pero está intentando registrarlo para el plan %s.', 'wp-mp-subscriptions'), $active_subscription['plan_id'], $plan_id));
+      }
+
+      // Guardar payment_id en metadatos del usuario
+      $existing_payments = get_user_meta($current_user->ID, '_mp_payment_ids', true);
+      $existing_payments = !empty($existing_payments) ? explode(',', $existing_payments) : [];
+      
+      if (!in_array($payment_id, $existing_payments)) {
+        $existing_payments[] = $payment_id;
+        update_user_meta($current_user->ID, '_mp_payment_ids', implode(',', $existing_payments));
+      }
+      
+      update_user_meta($current_user->ID, '_mp_plan_id', $plan_id);
+
+      // Cambiar rol a suscriptor
+      $user = new WP_User($current_user->ID);
+      $user->set_role('subscriber');
+
+      // Asociar el usuario a la suscripción existente y agregar el payment_id
+      $current_payment_ids = !empty($active_subscription['payment_ids']) ? explode(',', $active_subscription['payment_ids']) : [];
+      if (!in_array($payment_id, $current_payment_ids)) {
+        $current_payment_ids[] = $payment_id;
+      }
+
+      $wpdb->update(
+        $table,
+        [
+          'user_id' => $current_user->ID,
+          'payment_ids' => implode(',', $current_payment_ids)
+        ],
+        ['id' => $active_subscription['id']]
+      );
+
+      wp_send_json_success(__('Pago validado correctamente. Se asoció a su suscripción activa existente y su rol fue actualizado.', 'wp-mp-subscriptions'));
+
+    } catch (\Throwable $e) {
+      if (function_exists('wpmps_log_error')) {
+        wpmps_log_error('manual_payment', 'api_error', $e->getMessage());
+      }
+      wp_send_json_error(__('Error al verificar el pago con Mercado Pago.', 'wp-mp-subscriptions'));
     }
   }
 

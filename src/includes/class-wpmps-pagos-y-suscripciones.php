@@ -795,6 +795,24 @@ class WPMPS_Payments_Subscriptions {
         ));
       }
       
+      // Buscar por payment_ids en metadatos de usuario
+      if (!$user_id && !empty($sub['payment_ids'])) {
+        $payment_ids = explode(',', $sub['payment_ids']);
+        foreach ($payment_ids as $pid) {
+          $pid = trim($pid);
+          if (!empty($pid)) {
+            $user_id = $wpdb->get_var($wpdb->prepare(
+              "SELECT user_id FROM {$wpdb->usermeta} 
+               WHERE meta_key = '_mp_payment_ids' 
+               AND meta_value LIKE %s 
+               LIMIT 1",
+              '%' . $pid . '%'
+            ));
+            if ($user_id) break;
+          }
+        }
+      }
+      
       // Si no se encontró por preapproval_id, buscar por email
       if (!$user_id && !empty($payer_email)) {
         $user_id = $wpdb->get_var($wpdb->prepare(

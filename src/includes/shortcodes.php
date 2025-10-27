@@ -84,8 +84,90 @@ function wpmps_render_subscribe_shortcode($atts){
     ]);
   }
 
-  // Simple redirect approach - no modal, no complex JS
-  $html = '<a href="'.esc_url($checkout).'" class="'.esc_attr($class).'" target="_blank" rel="noopener noreferrer">'.esc_html($label).'</a>';
+  // Generar ID único para este shortcode
+  $unique_id = 'wpmps_' . uniqid();
+  
+  // HTML con botón y formulario para número de operación
+  $html = '<div class="wpmps-subscription-widget" id="' . $unique_id . '">';
+  $html .= '<a href="'.esc_url($checkout).'" class="'.esc_attr($class).'" target="_blank" rel="noopener noreferrer">'.esc_html($label).'</a>';
+  
+  // Formulario para ingresar número de operación manualmente
+  $html .= '<div class="wpmps-manual-payment" style="margin-top: 15px; padding: 15px; background: #f9f9f9; border: 1px solid #ddd; border-radius: 5px;">';
+  $html .= '<p style="margin: 0 0 10px 0; font-size: 14px;"><strong>' . __('¿Ya pagaste pero no se registró automáticamente?', 'wp-mp-subscriptions') . '</strong></p>';
+  $html .= '<p style="margin: 0 0 15px 0; font-size: 12px; color: #666;">' . __('Completa los datos que recibiste por email para validar tu pago:', 'wp-mp-subscriptions') . '</p>';
+  
+  $html .= '<form class="wpmps-payment-form" style="display: grid; gap: 10px; grid-template-columns: 1fr 1fr; align-items: end;">';
+  
+  $html .= '<div>';
+  $html .= '<label style="display: block; font-size: 12px; margin-bottom: 5px;">' . __('CUIT/CUIL del medio de pago:', 'wp-mp-subscriptions') . '</label>';
+  $html .= '<input type="text" name="cuit_cuil" placeholder="' . __('Ej: 20123456789', 'wp-mp-subscriptions') . '" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 3px;" required />';
+  $html .= '</div>';
+  
+  $html .= '<div>';
+  $html .= '<label style="display: block; font-size: 12px; margin-bottom: 5px;">' . __('Número de operación:', 'wp-mp-subscriptions') . '</label>';
+  $html .= '<input type="text" name="payment_id" placeholder="' . __('Ej: 1234567890', 'wp-mp-subscriptions') . '" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 3px;" required />';
+  $html .= '</div>';
+  
+  $html .= '<input type="hidden" name="plan_id" value="' . esc_attr($normalized) . '" />';
+  $html .= '<input type="hidden" name="action" value="wpmps_register_manual_payment" />';
+  $html .= '<input type="hidden" name="nonce" value="' . wp_create_nonce('wpmps_manual_payment') . '" />';
+  
+  $html .= '<div style="grid-column: 1 / -1; text-align: center; margin-top: 10px;">';
+  $html .= '<button type="submit" class="button button-primary">' . __('Validar y Registrar Pago', 'wp-mp-subscriptions') . '</button>';
+  $html .= '</div>';
+  $html .= '</form>';
+  
+  $html .= '<div class="wpmps-result" style="margin-top: 10px;"></div>';
+  $html .= '</div>';
+  $html .= '</div>';
+
+  // JavaScript para manejar el formulario
+  $html .= '<script>
+  document.addEventListener("DOMContentLoaded", function() {
+    const form = document.querySelector("#' . $unique_id . ' .wpmps-payment-form");
+    const resultDiv = document.querySelector("#' . $unique_id . ' .wmpps-result");
+    
+    if (form) {
+      form.addEventListener("submit", function(e) {
+        e.preventDefault();
+        
+        const formData = new FormData(form);
+        const button = form.querySelector("button[type=submit]");
+        const originalText = button.textContent;
+        
+        button.disabled = true;
+        button.textContent = "' . __('Verificando...', 'wp-mp-subscriptions') . '";
+        
+        fetch("' . admin_url('admin-ajax.php') . '", {
+          method: "POST",
+          body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+          const resultDiv = document.querySelector("#' . $unique_id . ' .wpmps-result");
+          if (data.success) {
+            resultDiv.innerHTML = "<div style=\"color: #00a32a; font-weight: bold; padding: 10px; background: #f0f8f0; border: 1px solid #00a32a; border-radius: 3px;\">" + data.data + "<br><small>' . __('Redirigiendo a cartelera...', 'wp-mp-subscriptions') . '</small></div>";
+            form.reset();
+            // Redirigir a cartelera después de 2 segundos
+            setTimeout(() => {
+              window.location.href = "' . home_url('/cartelera') . '";
+            }, 2000);
+          } else {
+            resultDiv.innerHTML = "<div style=\"color: #d63638; font-weight: bold; padding: 10px; background: #ffeaea; border: 1px solid #d63638; border-radius: 3px;\">" + data.data + "</div>";
+          }
+        })
+        .catch(error => {
+          const resultDiv = document.querySelector("#' . $unique_id . ' .wpmps-result");
+          resultDiv.innerHTML = "<div style=\"color: #d63638; font-weight: bold; padding: 10px; background: #ffeaea; border: 1px solid #d63638; border-radius: 3px;\">' . __('Error al procesar la solicitud.', 'wp-mp-subscriptions') . '</div>";
+        })
+        .finally(() => {
+          button.disabled = false;
+          button.textContent = originalText;
+        });
+      });
+    }
+  });
+  </script>';
 
   return $html;
 }
