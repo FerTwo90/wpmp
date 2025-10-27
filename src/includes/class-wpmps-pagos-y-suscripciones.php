@@ -141,4 +141,84 @@ class WPMPS_Payments_Subscriptions {
       'offset'  => $offset,
     ];
   }
+
+  /**
+   * Si la tabla no tiene suscripciones, obtiene las últimas desde MP y las inserta.
+   */
+  public static function bootstrap_subscriptions_if_empty($limit = 25){
+    global $wpdb;
+    self::maybe_install_table();
+    $table = self::table_name();
+
+    $existing = intval($wpdb->get_var(
+      $wpdb->prepare("SELECT COUNT(*) FROM {$table} WHERE event_type = %s", 'subscription')
+    ));
+
+    if ($existing > 0) {
+      return [
+        'seeded'  => false,
+        'message' => ''
+      ];
+    }
+
+    if (!class_exists('WPMPS_Subscribers')) {
+      return [
+        'seeded'  => false,
+        'message' => __('No se encontró la clase de suscriptores para poblar la tabla.', 'wp-mp-subscriptions')
+      ];
+    }
+
+    $latest = WPMPS_Subscribers::get_latest_subscriptions($limit);
+    if (empty($latest['success']) || empty($latest['subscriptions'])) {
+      return [
+        'seeded'  => false,
+        'message' => !empty($latest['message'])
+          ? $latest['message']
+          : __('Mercado Pago no devolvió suscripciones para inicializar la tabla.', 'wp-mp-subscriptions')
+      ];
+    }
+
+    $inserted = 0;
+    foreach ($latest['subscriptions'] as $sub) {
+      $created_at = self::normalize_datetime($sub['created_at'] ?? '');
+      $updated_at = self::normalize_datetime($sub['updated_at'] ?? '');
+
+      $data = [
+        'event_type'    => 'subscription',
+        'preapproval_id'=> sanitize_text_field($sub['preapproval_id'] ?? ''),
+        'payment_id'    => null,
+        'plan_id'       => sanitize_text_field($sub['plan_id'] ?? ''),
+        'user_id'       => null,
+        'amount'        => isset($sub['amount']) ? floatval($sub['amount']) : null,
+        'currency'      => sanitize_text_field($sub['currency'] ?? ''),
+        'status'        => sanitize_text_field($sub['status'] ?? ''),
+        'created_at'    => $created_at,
+        'updated_at'    => $updated_at,
+      ];
+
+      $result = $wpdb->insert($table, $data);
+      if ($result !== false) {
+        $inserted++;
+      }
+    }
+
+    return [
+      'seeded'  => $inserted > 0,
+      'inserted'=> $inserted,
+      'message' => $inserted > 0
+        ? sprintf(__('Se cargaron %d suscripciones recientes desde Mercado Pago.', 'wp-mp-subscriptions'), $inserted)
+        : __('No se pudieron insertar suscripciones en la tabla.', 'wp-mp-subscriptions')
+    ];
+  }
+
+  private static function normalize_datetime($value){
+    if (empty($value)) {
+      return current_time('mysql');
+    }
+    $ts = strtotime($value);
+    if (!$ts) {
+      return current_time('mysql');
+    }
+    return gmdate('Y-m-d H:i:s', $ts);
+  }
 }

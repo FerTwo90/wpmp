@@ -132,6 +132,8 @@ class WPMPS_Admin {
       wpmps_log_admin('render_pagos_y_suscripciones_start', []);
     }
 
+    $seed_result = WPMPS_Payments_Subscriptions::bootstrap_subscriptions_if_empty(25);
+
         // Get filter parameters
     $filters = array_filter([
       // 'status' => isset($_GET['filter_status']) ? sanitize_text_field($_GET['filter_status']) : '',
@@ -152,7 +154,8 @@ class WPMPS_Admin {
     self::view('payments-subscriptions', [
       'payments_data'       => $payments_data,
       'subscriptions_data'  => $subscriptions_data,
-      'filters'             => $filters
+      'filters'             => $filters,
+      'seed_result'         => $seed_result
     ]);
     echo '</div>';
 
