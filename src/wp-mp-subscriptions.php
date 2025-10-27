@@ -47,6 +47,10 @@ add_action('plugins_loaded', function(){
   load_plugin_textdomain('wp-mp-subscriptions', false, dirname(plugin_basename(__FILE__)).'/languages');
 });
 
+if (class_exists('WPMPS_Payments_Subscriptions')) {
+  WPMPS_Payments_Subscriptions::init();
+}
+
 // Admin init
 if (is_admin()){
   add_action('init', function(){
@@ -100,4 +104,10 @@ add_action('wpmps_webhook_processed', function() {
 // Limpiar programación al desactivar plugin
 register_deactivation_hook(__FILE__, function() {
   wp_clear_scheduled_hook('wpmps_warm_cache');
+});
+
+register_activation_hook(__FILE__, function(){
+  if (class_exists('WPMPS_Payments_Subscriptions')) {
+    WPMPS_Payments_Subscriptions::install_table();
+  }
 });

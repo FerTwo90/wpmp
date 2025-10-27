@@ -5,77 +5,32 @@ $payments_data      = isset($payments_data) ? $payments_data : ['success' => fal
 $subscriptions_data = isset($subscriptions_data) ? $subscriptions_data : ['success' => false, 'subscriptions' => []];
 $payments           = isset($payments_data['payments']) ? $payments_data['payments'] : [];
 $subscriptions      = isset($subscriptions_data['subscriptions']) ? $subscriptions_data['subscriptions'] : [];
+$payments_total     = isset($payments_data['total']) ? intval($payments_data['total']) : count($payments);
+$subscriptions_total= isset($subscriptions_data['total']) ? intval($subscriptions_data['total']) : count($subscriptions);
 ?>
 
-<div class="notice notice-info is-dismissible" style="margin-top: 15px;">
-  <p><?php _e('Esta vista es un punto de partida. Podés seguir desarrollando filtros, tablas y acciones sobre los datos de pagos y suscripciones aquí.', 'wp-mp-subscriptions'); ?></p>
-</div>
+<?php if (!$payments_data['success'] || !$subscriptions_data['success']): ?>
+  <div class="notice notice-warning" style="margin-top: 15px;">
+    <p><?php _e('Aún no hay datos en la tabla de mapeo. Una vez que vuelques pagos/suscripciones desde Mercado Pago, aparecerán acá.', 'wp-mp-subscriptions'); ?></p>
+  </div>
+<?php endif; ?>
 
 <div style="display:flex; flex-wrap:wrap; gap:20px; margin-top:20px;">
   <div style="flex:1; min-width:260px; background:#f9f9f9; border:1px solid #dcdcdc; padding:20px;">
     <h2 style="margin-top:0;"><?php _e('Resumen rápido', 'wp-mp-subscriptions'); ?></h2>
-    <p><strong><?php _e('Pagos recuperados:', 'wp-mp-subscriptions'); ?></strong> <?php echo esc_html(is_array($payments) ? count($payments) : 0); ?></p>
-    <p><strong><?php _e('Suscripciones recuperadas:', 'wp-mp-subscriptions'); ?></strong> <?php echo esc_html(is_array($subscriptions) ? count($subscriptions) : 0); ?></p>
+    <p><strong><?php _e('Pagos almacenados:', 'wp-mp-subscriptions'); ?></strong> <?php echo esc_html(number_format_i18n($payments_total)); ?></p>
+    <p><strong><?php _e('Suscripciones almacenadas:', 'wp-mp-subscriptions'); ?></strong> <?php echo esc_html(number_format_i18n($subscriptions_total)); ?></p>
+    <p style="font-size:12px; color:#666;">
+      <?php printf(esc_html__('Mostrando %1$d filas por tipo (limit %2$d, offset %3$d)', 'wp-mp-subscriptions'),
+        count($payments),
+        isset($payments_data['limit']) ? intval($payments_data['limit']) : 25,
+        isset($payments_data['offset']) ? intval($payments_data['offset']) : 0
+      ); ?>
+    </p>
     <?php if (!empty($filters)): ?>
-      <p style="font-size:12px; color:#666;"><?php _e('Filtros aplicados:', 'wp-mp-subscriptions'); ?> <?php echo esc_html(wp_json_encode($filters)); ?></p>
+      <p style="font-size:12px; color:#666; margin-top:10px;"><?php _e('Filtros aplicados:', 'wp-mp-subscriptions'); ?> <code><?php echo esc_html(wp_json_encode($filters)); ?></code></p>
     <?php endif; ?>
   </div>
 </div>
 
-<div style="display:flex; flex-wrap:wrap; gap:30px; margin-top:30px;">
-  <div style="flex:1; min-width:320px;">
-    <h2><?php _e('Pagos (vista preliminar)', 'wp-mp-subscriptions'); ?></h2>
-    <?php if (empty($payments)): ?>
-      <p><?php _e('Aún no hay pagos para mostrar.', 'wp-mp-subscriptions'); ?></p>
-    <?php else: ?>
-      <table class="widefat fixed striped">
-        <thead>
-          <tr>
-            <th><?php _e('ID', 'wp-mp-subscriptions'); ?></th>
-            <th><?php _e('Estado', 'wp-mp-subscriptions'); ?></th>
-            <th><?php _e('Email', 'wp-mp-subscriptions'); ?></th>
-            <th><?php _e('Monto', 'wp-mp-subscriptions'); ?></th>
-          </tr>
-        </thead>
-        <tbody>
-          <?php foreach (array_slice($payments, 0, 5) as $payment): ?>
-            <tr>
-              <td><code><?php echo esc_html($payment['id'] ?? '—'); ?></code></td>
-              <td><?php echo esc_html($payment['status'] ?? '—'); ?></td>
-              <td><?php echo esc_html($payment['payer']['email'] ?? ($payment['email'] ?? '—')); ?></td>
-              <td><?php echo esc_html(isset($payment['transaction_amount']) ? $payment['transaction_amount'] : ($payment['amount'] ?? '—')); ?></td>
-            </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
-      <p style="font-size:12px; color:#666;"><?php _e('Mostrando sólo los primeros 5 resultados para depurar. Extendé esta tabla según tus necesidades.', 'wp-mp-subscriptions'); ?></p>
-    <?php endif; ?>
-  </div>
-
-  <div style="flex:1; min-width:320px;">
-    <h2><?php _e('Suscripciones (vista preliminar)', 'wp-mp-subscriptions'); ?></h2>
-    <?php if (empty($subscriptions)): ?>
-      <p><?php _e('Aún no hay suscriptores para mostrar.', 'wp-mp-subscriptions'); ?></p>
-    <?php else: ?>
-      <table class="widefat fixed striped">
-        <thead>
-          <tr>
-            <th><?php _e('Email', 'wp-mp-subscriptions'); ?></th>
-            <th><?php _e('Estado MP', 'wp-mp-subscriptions'); ?></th>
-            <th><?php _e('Plan', 'wp-mp-subscriptions'); ?></th>
-          </tr>
-        </thead>
-        <tbody>
-          <?php foreach (array_slice($subscriptions, 0, 5) as $sub): ?>
-            <tr>
-              <td><?php echo esc_html($sub['email'] ?? '—'); ?></td>
-              <td><?php echo esc_html($sub['status'] ?? '—'); ?></td>
-              <td><?php echo esc_html($sub['plan_id'] ?? '—'); ?></td>
-            </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
-      <p style="font-size:12px; color:#666;"><?php _e('Mostrando sólo los primeros 5 registros. Podés reemplazar esta tabla con tus propios componentes.', 'wp-mp-subscriptions'); ?></p>
-    <?php endif; ?>
-  </div>
 </div>
