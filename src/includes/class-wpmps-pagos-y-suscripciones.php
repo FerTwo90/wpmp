@@ -4,7 +4,7 @@ if (!defined('ABSPATH')) exit;
 class WPMPS_Payments_Subscriptions {
   const TABLE_SLUG    = 'wpmps_mapping';
   const OPTION_DB_VER = 'wpmps_mapping_db_version';
-  const DB_VERSION    = '1.1.0';
+  const DB_VERSION    = '1.2.0';
 
   /**
    * Inicializa hooks para asegurar la tabla.
@@ -45,25 +45,21 @@ class WPMPS_Payments_Subscriptions {
 
     $sql = "CREATE TABLE {$table} (
       id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
-      event_type varchar(32) NOT NULL,
-      preapproval_id varchar(64) DEFAULT NULL,
-      payment_id varchar(64) DEFAULT NULL,
+      preapproval_id varchar(64) NOT NULL,
       plan_id varchar(64) DEFAULT NULL,
-      user_id bigint(20) unsigned DEFAULT NULL,
-      payer_id varchar(32) DEFAULT NULL,
+      plan_name varchar(255) DEFAULT NULL,
+      amount decimal(10,2) DEFAULT NULL,
       payer_first_name varchar(100) DEFAULT NULL,
       payer_last_name varchar(100) DEFAULT NULL,
       payer_email varchar(191) DEFAULT NULL,
       payer_identification varchar(64) DEFAULT NULL,
-      amount decimal(10,2) DEFAULT NULL,
-      currency varchar(8) DEFAULT NULL,
+      user_id bigint(20) unsigned DEFAULT NULL,
       status varchar(32) DEFAULT NULL,
       created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at datetime DEFAULT NULL,
+      payer_id varchar(32) DEFAULT NULL,
+      payment_ids TEXT DEFAULT NULL,
       PRIMARY KEY  (id),
-      KEY event_type (event_type),
-      KEY preapproval_id (preapproval_id),
-      KEY payment_id (payment_id),
+      UNIQUE KEY preapproval_id (preapproval_id),
       KEY plan_id (plan_id),
       KEY status (status),
       KEY payer_id (payer_id),
@@ -76,27 +72,9 @@ class WPMPS_Payments_Subscriptions {
   }
 
   /**
-   * Devuelve registros marcados como pagos.
-   */
-  public static function get_payments($filters = []) {
-    $result = self::get_records_by_type('payment', $filters);
-    $result['payments'] = $result['rows'];
-    return $result;
-  }
-
-  /**
-   * Devuelve registros marcados como suscripciones.
+   * Devuelve todas las suscripciones con sus pagos asociados.
    */
   public static function get_subscriptions($filters = []) {
-    $result = self::get_records_by_type('subscription', $filters);
-    $result['subscriptions'] = $result['rows'];
-    return $result;
-  }
-
-  /**
-   * Consulta rápida a la tabla consolidada.
-   */
-  private static function get_records_by_type($type, $filters = []) {
     global $wpdb;
     self::maybe_install_table();
 
@@ -104,8 +82,8 @@ class WPMPS_Payments_Subscriptions {
     $limit  = isset($filters['limit']) ? max(1, intval($filters['limit'])) : 25;
     $offset = isset($filters['offset']) ? max(0, intval($filters['offset'])) : 0;
 
-    $where   = ['event_type = %s'];
-    $params  = [$type];
+    $where   = [];
+    $params  = [];
 
     if (!empty($filters['status'])) {
       $where[] = 'status = %s';
@@ -117,18 +95,7 @@ class WPMPS_Payments_Subscriptions {
       $params[] = sanitize_text_field($filters['plan_id']);
     }
 
-    if (!empty($filters['preapproval_id'])) {
-      $where[] = 'preapproval_id = %s';
-      $params[] = sanitize_text_field($filters['preapproval_id']);
-    }
-
-    if (!empty($filters['payment_id'])) {
-      $where[] = 'payment_id = %s';
-      $params[] = sanitize_text_field($filters['payment_id']);
-    }
-
-    $where_sql = 'WHERE ' . implode(' AND ', $where);
-
+    $where_sql = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
     $order_sql = 'ORDER BY created_at DESC';
     $query_sql = "SELECT * FROM {$table} {$where_sql} {$order_sql} LIMIT %d OFFSET %d";
     $query_params = array_merge($params, [$limit, $offset]);
@@ -137,17 +104,19 @@ class WPMPS_Payments_Subscriptions {
     $rows = $wpdb->get_results($prepared_query, ARRAY_A);
 
     $count_sql = "SELECT COUNT(*) FROM {$table} {$where_sql}";
-    $prepared_count = $wpdb->prepare($count_sql, $params);
+    $prepared_count = !empty($params) ? $wpdb->prepare($count_sql, $params) : $count_sql;
     $total = intval($wpdb->get_var($prepared_count));
 
     return [
       'success' => true,
-      'rows'    => $rows ?: [],
+      'subscriptions' => $rows ?: [],
       'total'   => $total,
       'limit'   => $limit,
       'offset'  => $offset,
     ];
   }
+
+
 
   /**
    * Si la tabla no tiene suscripciones, obtiene las últimas desde MP y las inserta.
@@ -157,9 +126,7 @@ class WPMPS_Payments_Subscriptions {
     self::maybe_install_table();
     $table = self::table_name();
 
-    $existing = intval($wpdb->get_var(
-      $wpdb->prepare("SELECT COUNT(*) FROM {$table} WHERE event_type = %s", 'subscription')
-    ));
+    $existing = intval($wpdb->get_var("SELECT COUNT(*) FROM {$table}"));
 
     if ($existing > 0) {
       return [
@@ -185,27 +152,44 @@ class WPMPS_Payments_Subscriptions {
       ];
     }
 
+    // Obtener planes para mapear nombres
+    $plans_map = [];
+    if (class_exists('WPMPS_Sync')) {
+      $plans = WPMPS_Sync::get_plans();
+      foreach ($plans as $plan) {
+        $plans_map[$plan['id']] = $plan['name'];
+      }
+    }
+
     $inserted = 0;
     foreach ($latest['subscriptions'] as $sub) {
-      $created_at = self::normalize_datetime($sub['created_at'] ?? '');
-      $updated_at = self::normalize_datetime($sub['updated_at'] ?? '');
+      $created_at = self::normalize_datetime($sub['date_created'] ?? ($sub['created_at'] ?? ''));
+
+      // Extraer payer_id correctamente desde la estructura de la suscripción
+      $payer_id = '';
+      if (isset($sub['payer']['id'])) {
+        $payer_id = sanitize_text_field((string)$sub['payer']['id']);
+      } elseif (isset($sub['payer_id'])) {
+        $payer_id = sanitize_text_field((string)$sub['payer_id']);
+      }
+
+      $plan_id = sanitize_text_field($sub['preapproval_plan_id'] ?? ($sub['plan_id'] ?? ''));
+      $plan_name = isset($plans_map[$plan_id]) ? $plans_map[$plan_id] : '';
 
       $data = [
-        'event_type'    => 'subscription',
-        'preapproval_id'=> sanitize_text_field($sub['preapproval_id'] ?? ''),
-        'payment_id'    => null,
-        'plan_id'       => sanitize_text_field($sub['plan_id'] ?? ''),
+        'preapproval_id'=> sanitize_text_field($sub['id'] ?? ($sub['preapproval_id'] ?? '')),
+        'plan_id'       => $plan_id,
+        'plan_name'     => $plan_name,
+        'amount'        => isset($sub['auto_recurring']['transaction_amount']) ? floatval($sub['auto_recurring']['transaction_amount']) : (isset($sub['amount']) ? floatval($sub['amount']) : null),
+        'payer_first_name' => sanitize_text_field($sub['payer']['first_name'] ?? ($sub['payer_first_name'] ?? '')),
+        'payer_last_name'  => sanitize_text_field($sub['payer']['last_name'] ?? ($sub['payer_last_name'] ?? '')),
+        'payer_email'      => sanitize_email($sub['payer']['email'] ?? ($sub['payer_email'] ?? '')),
+        'payer_identification' => sanitize_text_field($sub['payer']['identification']['number'] ?? ''),
         'user_id'       => null,
-        'payer_id'      => sanitize_text_field((string)($sub['payer_id'] ?? '')),
-        'payer_first_name' => sanitize_text_field($sub['payer_first_name'] ?? ''),
-        'payer_last_name'  => sanitize_text_field($sub['payer_last_name'] ?? ''),
-        'payer_email'      => sanitize_email($sub['payer_email'] ?? ''),
-        'payer_identification' => '',
-        'amount'        => isset($sub['amount']) ? floatval($sub['amount']) : null,
-        'currency'      => sanitize_text_field($sub['currency'] ?? ''),
         'status'        => sanitize_text_field($sub['status'] ?? ''),
         'created_at'    => $created_at,
-        'updated_at'    => $updated_at,
+        'payer_id'      => $payer_id,
+        'payment_ids'   => '', // Se llenará con los pagos
       ];
 
       $result = $wpdb->insert($table, $data);
@@ -223,31 +207,25 @@ class WPMPS_Payments_Subscriptions {
     ];
   }
 
-  public static function sync_payments_for_subscriptions($limit = 25){
+
+
+  /**
+   * Sincroniza pagos para las suscripciones existentes
+   */
+  public static function force_sync_all_payments($limit = 100) {
     global $wpdb;
     self::maybe_install_table();
     $table = self::table_name();
 
-    $preapproval_ids = $wpdb->get_col(
-      $wpdb->prepare(
-        "SELECT DISTINCT preapproval_id FROM {$table} WHERE event_type = %s AND preapproval_id <> '' ORDER BY created_at DESC LIMIT %d",
-        'subscription',
-        max(1, intval($limit))
-      )
+    $subscriptions = $wpdb->get_results(
+      $wpdb->prepare("SELECT * FROM {$table} WHERE payer_id <> '' LIMIT %d", max(1, intval($limit))),
+      ARRAY_A
     );
 
-    $payer_ids = $wpdb->get_col(
-      $wpdb->prepare(
-        "SELECT DISTINCT payer_id FROM {$table} WHERE event_type = %s AND payer_id <> '' ORDER BY id DESC LIMIT %d",
-        'subscription',
-        max(1, intval($limit))
-      )
-    );
-
-    if (empty($preapproval_ids) && empty($payer_ids)) {
+    if (empty($subscriptions)) {
       return [
         'seeded'  => false,
-        'message' => __('No hay suscripciones con datos suficientes para mapear pagos.', 'wp-mp-subscriptions')
+        'message' => __('No hay suscripciones con payer_id para sincronizar pagos.', 'wp-mp-subscriptions')
       ];
     }
 
@@ -271,12 +249,14 @@ class WPMPS_Payments_Subscriptions {
       ];
     }
 
-    $normalized_pre_ids = array_filter(array_map('strval', $preapproval_ids));
-    $inserted = 0;
-    $processed_payers = 0;
+    $updated = 0;
+    $processed_subs = 0;
 
-    foreach ($payer_ids as $payer_id) {
-      $processed_payers++;
+    foreach ($subscriptions as $subscription) {
+      $processed_subs++;
+      $payer_id = $subscription['payer_id'];
+      
+      // Buscar pagos por payer.id usando la API de Mercado Pago
       $response = $client->search_payments([
         'sort'     => 'date_created',
         'criteria' => 'desc',
@@ -289,101 +269,120 @@ class WPMPS_Payments_Subscriptions {
       $results = isset($body['results']) && is_array($body['results']) ? $body['results'] : [];
 
       if ($http_code !== 200 || empty($results)) {
-        if (function_exists('wpmps_log_error')){
-          $body_preview = is_scalar($body) ? $body : wp_json_encode($body);
-          if (is_string($body_preview) && strlen($body_preview) > 500) {
-            $body_preview = substr($body_preview, 0, 500) . '...';
-          }
-          wpmps_log_error('payments', 'mp_fetch_error', 'No se pudieron obtener pagos para un payer id', [
-            'http_code' => $http_code,
-            'payer_id'  => $payer_id,
-            'body'      => $body_preview
-          ]);
-        }
         continue;
       }
 
+      $payment_ids = [];
       foreach ($results as $payment) {
-        $pre_id = sanitize_text_field($payment['metadata']['preapproval_id'] ?? ($payment['preapproval_id'] ?? ''));
-        $matches_preapproval = $pre_id && in_array($pre_id, $normalized_pre_ids, true);
-
         $payment_id = sanitize_text_field((string)($payment['id'] ?? ''));
-        if (!$payment_id) continue;
+        if ($payment_id) {
+          $payment_ids[] = $payment_id;
+        }
+      }
 
-        $exists = $wpdb->get_var($wpdb->prepare(
-          "SELECT id FROM {$table} WHERE event_type = %s AND payment_id = %s LIMIT 1",
-          'payment',
-          $payment_id
-        ));
-        if (!$exists) {
-          $amount   = isset($payment['transaction_amount']) ? floatval($payment['transaction_amount']) : null;
-          $currency = sanitize_text_field($payment['currency_id'] ?? '');
-          $status   = sanitize_text_field($payment['status'] ?? '');
-          $plan_id  = sanitize_text_field($payment['metadata']['plan_id'] ?? ($payment['plan_id'] ?? ''));
-          $created_at = self::normalize_datetime($payment['date_created'] ?? '');
-          $updated_at = self::normalize_datetime($payment['date_last_updated'] ?? '');
-          $payer_email = sanitize_email($payment['payer']['email'] ?? '');
-          $payer_identification = '';
-          if (!empty($payment['payer']['identification']['number'])) {
-            $payer_identification = sanitize_text_field(
-              trim(($payment['payer']['identification']['type'] ?? '').' '.$payment['payer']['identification']['number'])
-            );
-          }
-
-          $data = [
-            'event_type'    => 'payment',
-            'preapproval_id'=> $matches_preapproval ? $pre_id : '',
-            'payment_id'    => $payment_id,
-            'plan_id'       => $plan_id,
-            'user_id'       => null,
-            'payer_id'      => sanitize_text_field($payer_id),
-            'payer_first_name' => sanitize_text_field($payment['payer']['first_name'] ?? ''),
-            'payer_last_name'  => sanitize_text_field($payment['payer']['last_name'] ?? ''),
-            'payer_email'      => $payer_email,
-            'payer_identification' => $payer_identification,
-            'amount'        => $amount,
-            'currency'      => $currency,
-            'status'        => $status,
-            'created_at'    => $created_at,
-            'updated_at'    => $updated_at,
-          ];
-
-          $insert = $wpdb->insert($table, $data);
-          if ($insert !== false) {
-            $inserted++;
-          }
+      if (!empty($payment_ids)) {
+        // Obtener datos del pagador del primer pago para actualizar la suscripción
+        $first_payment = $results[0];
+        $payer_email = sanitize_email($first_payment['payer']['email'] ?? '');
+        $payer_identification = '';
+        if (!empty($first_payment['payer']['identification']['number'])) {
+          $payer_identification = sanitize_text_field(
+            trim(($first_payment['payer']['identification']['type'] ?? '').' '.$first_payment['payer']['identification']['number'])
+          );
         }
 
-        $update_data = array_filter([
-          'payer_email' => sanitize_email($payment['payer']['email'] ?? '') ?: null,
-          'payer_identification' => !empty($payment['payer']['identification']['number'])
-            ? sanitize_text_field(trim(($payment['payer']['identification']['type'] ?? '').' '.$payment['payer']['identification']['number']))
-            : null,
-          'payer_first_name' => sanitize_text_field($payment['payer']['first_name'] ?? ''),
-          'payer_last_name'  => sanitize_text_field($payment['payer']['last_name'] ?? ''),
-        ], function($value){
-          return $value !== null && $value !== '';
-        });
-
-        if ($update_data) {
-          $where = ['event_type' => 'subscription'];
-          if ($matches_preapproval) {
-            $where['preapproval_id'] = $pre_id;
-          } else {
-            $where['payer_id'] = sanitize_text_field($payer_id);
-          }
-          $wpdb->update($table, $update_data, $where);
+        $update_data = ['payment_ids' => implode(',', $payment_ids)];
+        
+        // Solo actualizar email y documento si están vacíos en la suscripción
+        if (empty($subscription['payer_email']) && !empty($payer_email)) {
+          $update_data['payer_email'] = $payer_email;
         }
+        if (empty($subscription['payer_identification']) && !empty($payer_identification)) {
+          $update_data['payer_identification'] = $payer_identification;
+        }
+
+        $wpdb->update($table, $update_data, ['id' => $subscription['id']]);
+        $updated++;
       }
     }
 
     return [
-      'seeded'  => $inserted > 0,
-      'inserted'=> $inserted,
-      'message' => $inserted > 0
-        ? sprintf(__('Se cargaron %1$d pagos vinculados consultando %2$d payer_id.', 'wp-mp-subscriptions'), $inserted, $processed_payers)
-        : __('No se encontraron pagos nuevos para los payer_id actuales.', 'wp-mp-subscriptions')
+      'seeded'  => $updated > 0,
+      'updated' => $updated,
+      'processed_subs' => $processed_subs,
+      'message' => $updated > 0
+        ? sprintf(__('Se actualizaron %1$d suscripciones con pagos consultando %2$d payer_id desde la API de Mercado Pago.', 'wp-mp-subscriptions'), $updated, $processed_subs)
+        : sprintf(__('No se encontraron pagos nuevos consultando %d suscripciones desde la API de Mercado Pago.', 'wp-mp-subscriptions'), $processed_subs)
     ];
+  }
+
+  /**
+   * Obtiene estadísticas básicas de la tabla
+   */
+  public static function get_stats() {
+    global $wpdb;
+    self::maybe_install_table();
+    $table = self::table_name();
+
+    $stats = [
+      'total_subscriptions' => 0,
+      'total_payments' => 0,
+      'matched_payments' => 0,
+      'unmatched_payments' => 0,
+      'unique_payers' => 0,
+      'last_sync' => get_transient('wpmps_payments_last_sync')
+    ];
+
+    $stats['total_subscriptions'] = intval($wpdb->get_var(
+      $wpdb->prepare("SELECT COUNT(*) FROM {$table} WHERE event_type = %s", 'subscription')
+    ));
+
+    $stats['total_payments'] = intval($wpdb->get_var(
+      $wpdb->prepare("SELECT COUNT(*) FROM {$table} WHERE event_type = %s", 'payment')
+    ));
+
+    $stats['matched_payments'] = intval($wpdb->get_var(
+      $wpdb->prepare("SELECT COUNT(*) FROM {$table} WHERE event_type = %s AND preapproval_id <> ''", 'payment')
+    ));
+
+    $stats['unmatched_payments'] = $stats['total_payments'] - $stats['matched_payments'];
+
+    $stats['unique_payers'] = intval($wpdb->get_var(
+      $wpdb->prepare("SELECT COUNT(DISTINCT payer_id) FROM {$table} WHERE payer_id <> ''")
+    ));
+
+    return $stats;
+  }
+
+  /**
+   * Limpia el caché de sincronización
+   */
+  public static function clear_sync_cache() {
+    delete_transient('wpmps_payments_last_sync');
+    return true;
+  }
+
+  /**
+   * Borra toda la tabla para reiniciar el proceso
+   */
+  public static function reset_table() {
+    global $wpdb;
+    $table = self::table_name();
+    
+    $result = $wpdb->query("TRUNCATE TABLE {$table}");
+    
+    if ($result !== false) {
+      self::clear_sync_cache();
+      return [
+        'success' => true,
+        'message' => __('Tabla reiniciada correctamente. Se volverán a cargar los datos en la próxima sincronización.', 'wp-mp-subscriptions')
+      ];
+    } else {
+      return [
+        'success' => false,
+        'message' => __('Error al reiniciar la tabla.', 'wp-mp-subscriptions')
+      ];
+    }
   }
 
   private static function normalize_datetime($value){

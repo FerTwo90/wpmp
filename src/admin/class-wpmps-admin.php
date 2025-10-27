@@ -16,6 +16,10 @@ class WPMPS_Admin {
     add_action('admin_post_wpmps_clear_cache', [__CLASS__, 'clear_cache']);
     add_action('admin_post_wpmps_refresh_background', [__CLASS__, 'refresh_background']);
     add_action('admin_post_wpmps_clear_payments_cache', [__CLASS__, 'clear_payments_cache']);
+    add_action('admin_post_wpmps_sync_payments_subscriptions', [__CLASS__, 'handle_sync_payments_subscriptions']);
+    add_action('admin_post_wpmps_force_sync_payments', [__CLASS__, 'handle_force_sync_payments']);
+    add_action('admin_post_wpmps_clear_sync_cache', [__CLASS__, 'handle_clear_sync_cache']);
+    add_action('admin_post_wpmps_reset_payments_table', [__CLASS__, 'handle_reset_payments_table']);
     add_filter('default_content', [__CLASS__, 'maybe_inject_shortcode'], 10, 2);
   }
 
@@ -133,27 +137,18 @@ class WPMPS_Admin {
     }
 
     $seed_result = WPMPS_Payments_Subscriptions::bootstrap_subscriptions_if_empty(25);
-    $payments_seed_result = WPMPS_Payments_Subscriptions::sync_payments_for_subscriptions(25);
-
-        // Get filter parameters
-    $filters = array_filter([
-      // 'status' => isset($_GET['filter_status']) ? sanitize_text_field($_GET['filter_status']) : '',
-      // 'match_type' => isset($_GET['filter_match']) ? sanitize_text_field($_GET['filter_match']) : '',
-      // 'email' => isset($_GET['filter_email']) ? sanitize_text_field($_GET['filter_email']) : '',
-      // 'amount_min' => isset($_GET['filter_amount_min']) ? sanitize_text_field($_GET['filter_amount_min']) : '',
-      // 'amount_max' => isset($_GET['filter_amount_max']) ? sanitize_text_field($_GET['filter_amount_max']) : '',
-      // 'plan_id' => isset($_GET['filter_plan_id']) ? sanitize_text_field($_GET['filter_plan_id']) : '',
-      // 'plan_name' => isset($_GET['filter_plan_name']) ? sanitize_text_field($_GET['filter_plan_name']) : ''
-    ]);
     
-    $payments_data = WPMPS_Payments_Subscriptions::get_payments($filters);
+    // SIEMPRE sincronizar pagos cuando se carga la pestaña
+    $payments_seed_result = WPMPS_Payments_Subscriptions::force_sync_all_payments(50);
+
+    $filters = [];
+    
     $subscriptions_data = WPMPS_Payments_Subscriptions::get_subscriptions($filters);
     
     echo '<div class="wrap">';
     echo '<h1>'.esc_html__('Pagos y Suscripciones', 'wp-mp-subscriptions').'</h1>';
     self::tabs('wpmps-payments-subscriptions');
     self::view('payments-subscriptions', [
-      'payments_data'       => $payments_data,
       'subscriptions_data'  => $subscriptions_data,
       'filters'             => $filters,
       'seed_result'         => $seed_result,
@@ -399,6 +394,81 @@ class WPMPS_Admin {
     $updated = WPMPS_Subscribers::refresh_subscribers_background(10);
     
     wp_redirect(add_query_arg('background_updated', $updated, admin_url('admin.php?page=wpmps-subscribers')));
+    exit;
+  }
+
+  /**
+   * Handler para sincronizar pagos y suscripciones
+   */
+  public static function handle_sync_payments_subscriptions(){
+    if (!current_user_can('manage_options')) wp_die('');
+    check_admin_referer('wpmps_sync_payments_subscriptions');
+
+    $result = WPMPS_Payments_Subscriptions::sync_payments_for_subscriptions(50);
+    
+    $redirect_args = [
+      'sync_completed' => $result['seeded'] ? 1 : 0,
+      'sync_message' => urlencode($result['message'])
+    ];
+    
+    if (isset($result['inserted'])) {
+      $redirect_args['sync_inserted'] = $result['inserted'];
+    }
+    
+    wp_redirect(add_query_arg($redirect_args, admin_url('admin.php?page=wpmps-payments-subscriptions')));
+    exit;
+  }
+
+  /**
+   * Handler para forzar sincronización de pagos
+   */
+  public static function handle_force_sync_payments(){
+    if (!current_user_can('manage_options')) wp_die('');
+    check_admin_referer('wpmps_force_sync_payments');
+
+    $result = WPMPS_Payments_Subscriptions::force_sync_all_payments(100);
+    
+    $redirect_args = [
+      'force_sync_completed' => $result['seeded'] ? 1 : 0,
+      'force_sync_message' => urlencode($result['message'])
+    ];
+    
+    if (isset($result['inserted'])) {
+      $redirect_args['force_sync_inserted'] = $result['inserted'];
+    }
+    
+    wp_redirect(add_query_arg($redirect_args, admin_url('admin.php?page=wpmps-payments-subscriptions')));
+    exit;
+  }
+
+  /**
+   * Handler para limpiar caché de sincronización
+   */
+  public static function handle_clear_sync_cache(){
+    if (!current_user_can('manage_options')) wp_die('');
+    check_admin_referer('wpmps_clear_sync_cache');
+
+    WPMPS_Payments_Subscriptions::clear_sync_cache();
+    
+    wp_redirect(add_query_arg('sync_cache_cleared', 1, admin_url('admin.php?page=wpmps-payments-subscriptions')));
+    exit;
+  }
+
+  /**
+   * Handler para resetear la tabla de pagos y suscripciones
+   */
+  public static function handle_reset_payments_table(){
+    if (!current_user_can('manage_options')) wp_die('');
+    check_admin_referer('wpmps_reset_payments_table');
+
+    $result = WPMPS_Payments_Subscriptions::reset_table();
+    
+    $redirect_args = [
+      'table_reset' => $result['success'] ? 1 : 0,
+      'reset_message' => urlencode($result['message'])
+    ];
+    
+    wp_redirect(add_query_arg($redirect_args, admin_url('admin.php?page=wpmps-payments-subscriptions')));
     exit;
   }
 
