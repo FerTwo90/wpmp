@@ -32,12 +32,12 @@ class WPMPS_Admin {
     );
     add_submenu_page('wpmps', __('Ajustes', 'wp-mp-subscriptions'), __('Ajustes', 'wp-mp-subscriptions'), $cap, 'wpmps-settings', [__CLASS__, 'render_settings']);
     add_submenu_page('wpmps', __('Planes', 'wp-mp-subscriptions'), __('Planes', 'wp-mp-subscriptions'), $cap, 'wpmps-plans', [__CLASS__, 'render_plans']);
-    add_submenu_page('wpmps', __('Suscriptores', 'wp-mp-subscriptions'), __('Suscriptores', 'wp-mp-subscriptions'), $cap, 'wpmps-subscribers', [__CLASS__, 'render_subscribers']);
-    add_submenu_page('wpmps', __('Pagos MP', 'wp-mp-subscriptions'), __('Pagos MP', 'wp-mp-subscriptions'), $cap, 'wpmps-payments', [__CLASS__, 'render_payments']);
+    // add_submenu_page('wpmps', __('Suscriptores', 'wp-mp-subscriptions'), __('Suscriptores', 'wp-mp-subscriptions'), $cap, 'wpmps-subscribers', [__CLASS__, 'render_subscribers']);
+    // add_submenu_page('wpmps', __('Pagos MP', 'wp-mp-subscriptions'), __('Pagos MP', 'wp-mp-subscriptions'), $cap, 'wpmps-payments', [__CLASS__, 'render_payments']);
     add_submenu_page('wpmps', __('Mail', 'wp-mp-subscriptions'), __('Mail', 'wp-mp-subscriptions'), $cap, 'wpmps-mail', [__CLASS__, 'render_mail']);
     add_submenu_page('wpmps', __('Cron', 'wp-mp-subscriptions'), __('Cron', 'wp-mp-subscriptions'), $cap, 'wpmps-cron', [__CLASS__, 'render_cron']);
+    add_submenu_page('wpmps', __('Pagos y Suscripciones', 'wp-mp-subscriptions'), __('Pagos y Suscripciones', 'wp-mp-subscriptions'), $cap, 'wpmps-payments-subscriptions', [__CLASS__, 'render_payments_subscriptions']);
     add_submenu_page('wpmps', __('Logs', 'wp-mp-subscriptions'), __('Logs', 'wp-mp-subscriptions'), $cap, 'wpmps-logs', [__CLASS__, 'render_logs']);
-    add_submenu_page('wpmps', __('Pagos y Suscripciones', 'wp-mp-subscriptions'), __('Pagos y Suscripciones', 'wp-mp-subscriptions'), $cap, 'wpmps-pagos-y-suscripciones', [__CLASS__, 'render_pagos_y_suscripciones']);
   }
 
   private static function view($name, $vars = []){
@@ -54,12 +54,12 @@ class WPMPS_Admin {
     $tabs = [
       'wpmps-settings'   => __('Ajustes','wp-mp-subscriptions'),
       'wpmps-plans'      => __('Planes','wp-mp-subscriptions'),
-      'wpmps-subscribers'=> __('Suscriptores','wp-mp-subscriptions'),
-      'wpmps-payments'   => __('Pagos MP','wp-mp-subscriptions'),
+      // 'wpmps-subscribers'=> __('Suscriptores','wp-mp-subscriptions'),
+      // 'wpmps-payments'   => __('Pagos MP','wp-mp-subscriptions'),
       'wpmps-mail'       => __('Mail','wp-mp-subscriptions'),
       'wpmps-cron'       => __('Cron','wp-mp-subscriptions'),
+      'wpmps-payments-subscriptions' => __('Pagos y Suscripciones','wp-mp-subscriptions'),
       'wpmps-logs'       => __('Logs','wp-mp-subscriptions'),
-      'wpmps-pagos-y-suscripciones' => __('Pagos y Suscripciones','wp-mp-subscriptions'),
     ];
     echo '<h1 class="nav-tab-wrapper">';
     foreach ($tabs as $slug=>$label){
@@ -153,6 +153,39 @@ class WPMPS_Admin {
     
     self::view('cron', ['status' => $status]);
     echo '</div>';
+  }
+
+  public static function render_payments_subscriptions(){
+    if (!current_user_can('manage_options')) return;
+
+    if (function_exists('wpmps_log_admin')){
+      wpmps_log_admin('render_pagos_y_suscripciones_start', []);
+    }
+
+        // Get filter parameters
+    $filters = array_filter([
+      // 'status' => isset($_GET['filter_status']) ? sanitize_text_field($_GET['filter_status']) : '',
+      // 'match_type' => isset($_GET['filter_match']) ? sanitize_text_field($_GET['filter_match']) : '',
+      // 'email' => isset($_GET['filter_email']) ? sanitize_text_field($_GET['filter_email']) : '',
+      // 'amount_min' => isset($_GET['filter_amount_min']) ? sanitize_text_field($_GET['filter_amount_min']) : '',
+      // 'amount_max' => isset($_GET['filter_amount_max']) ? sanitize_text_field($_GET['filter_amount_max']) : '',
+      // 'plan_id' => isset($_GET['filter_plan_id']) ? sanitize_text_field($_GET['filter_plan_id']) : '',
+      // 'plan_name' => isset($_GET['filter_plan_name']) ? sanitize_text_field($_GET['filter_plan_name']) : ''
+    ]);
+    
+    $payments_data = WPMPS_Payments_Subscriptions::get_payments($filters);
+    $subscriptions_data = WPMPS_Payments_Subscriptions::get_subscriptions($filters);
+    
+    echo '<div class="wrap">';
+    echo '<h1>'.esc_html__('Pagos de MercadoPago', 'wp-mp-subscriptions').'</h1>';
+    self::tabs('wpmps-payments');
+    self::view('payments', [
+      'payments_data' => $payments_data,
+      'subscriptions_data' => $subscriptions_data,
+      'filters' => $filters
+    ]);
+    echo '</div>';
+
   }
 
   public static function render_payments(){
