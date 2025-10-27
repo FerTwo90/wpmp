@@ -133,6 +133,7 @@ class WPMPS_Admin {
     }
 
     $seed_result = WPMPS_Payments_Subscriptions::bootstrap_subscriptions_if_empty(25);
+    $payments_seed_result = WPMPS_Payments_Subscriptions::sync_payments_for_subscriptions(25);
 
         // Get filter parameters
     $filters = array_filter([
@@ -155,7 +156,8 @@ class WPMPS_Admin {
       'payments_data'       => $payments_data,
       'subscriptions_data'  => $subscriptions_data,
       'filters'             => $filters,
-      'seed_result'         => $seed_result
+      'seed_result'         => $seed_result,
+      'payments_seed_result'=> $payments_seed_result
     ]);
     echo '</div>';
 

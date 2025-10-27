@@ -77,6 +77,9 @@ class WPMPS_Subscribers {
     return [
       'preapproval_id' => sanitize_text_field($item['id'] ?? ''),
       'plan_id'        => sanitize_text_field($item['preapproval_plan_id'] ?? ''),
+      'payer_id'       => isset($item['payer_id']) ? sanitize_text_field((string)$item['payer_id']) : '',
+      'payer_first_name' => sanitize_text_field($item['payer_first_name'] ?? ''),
+      'payer_last_name'  => sanitize_text_field($item['payer_last_name'] ?? ''),
       'payer_email'    => sanitize_email($item['payer_email'] ?? ''),
       'status'         => sanitize_text_field($item['status'] ?? ''),
       'reason'         => sanitize_text_field($item['reason'] ?? ''),
